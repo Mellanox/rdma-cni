@@ -57,6 +57,9 @@ MOCKERY_VERSION ?= v3.5.4
 TIMEOUT = 30
 Q = $(if $(filter 1,$V),,@)
 
+# License targets
+include make/license.mk
+
 .PHONY: all
 all: generate lint build
 
