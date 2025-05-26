@@ -56,6 +56,9 @@ GOLANGCI_LINT_VER = v1.64.7
 TIMEOUT = 30
 Q = $(if $(filter 1,$V),,@)
 
+# License targets
+include make/license.mk
+
 .PHONY: all
 all: lint build
 
