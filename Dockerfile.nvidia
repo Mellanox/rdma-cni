@@ -10,7 +10,7 @@ RUN apk add --no-cache --virtual build-dependencies build-base=~0.5 && \
     make clean && \
     make build
 
-FROM nvcr.io/nvidia/distroless/go:v3.1.6
+FROM nvcr.io/nvidia/doca/doca:3.0.0-base-rt-host
 COPY --from=builder /usr/src/rdma-cni/build/rdma /usr/bin/
 WORKDIR /
 
