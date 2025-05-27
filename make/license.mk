@@ -13,7 +13,7 @@ BIN_DIR            ?= ./bin
 ADDLICENSE         ?= $(BIN_DIR)/addlicense
 ADDLICENSE_VERSION ?= latest
 GO_LICENSES        ?= $(BIN_DIR)/go-licenses
-GO_LICENSES_VERSION ?= v1.6.0
+GO_LICENSES_VERSION ?= latest
 
 # Ensure bin dir exists
 $(BIN_DIR):
@@ -55,21 +55,14 @@ go-licenses: $(BIN_DIR)
 .PHONY: third-party-licenses
 third-party-licenses: go-licenses
 	@echo "Collecting third-party licenses..."
-	@$(GO_LICENSES) save ./... --save_path=third_party_licenses --ignore=github.com/ajeddeloh/go-json || true
+	@$(GO_LICENSES) save ./... --save_path=third_party_licenses --ignore=golang.org/x/sys/unix
 	@echo "Generating THIRD_PARTY_NOTICES..."
-	@if [ -d "third_party_licenses" ]; then \
-		find third_party_licenses -type f -iname "LICENSE*" | sort | while read -r license; do \
-			echo "---"; \
-			echo "## $$(basename $$(dirname "$$license"))"; \
-			echo ""; \
-			cat "$$license"; \
-			echo ""; \
-		done > THIRD_PARTY_NOTICES; \
-		rm -rf third_party_licenses; \
-		echo "THIRD_PARTY_NOTICES updated."; \
-	else \
-		echo "Warning: No third-party licenses were found."; \
-		echo "---" > THIRD_PARTY_NOTICES; \
-		echo "## No third-party licenses found" >> THIRD_PARTY_NOTICES; \
-		echo "" >> THIRD_PARTY_NOTICES; \
-	fi
+	@find third_party_licenses -type f -iname "LICENSE*" | sort --ignore-case | while read -r license; do \
+		echo "---"; \
+		echo "## $$(basename $$(dirname "$$license"))"; \
+		echo ""; \
+		cat "$$license"; \
+		echo ""; \
+	done > THIRD_PARTY_NOTICES
+	@rm -rf third_party_licenses
+	@echo "THIRD_PARTY_NOTICES updated."
