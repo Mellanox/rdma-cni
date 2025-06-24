@@ -25,7 +25,7 @@ jobs:
       registry-internal: nvcr.io/nvstaging/mellanox
       service-account-username: nvidia-ci-cd
       service-account-email: svc-cloud-orch-gh@nvidia.com
-      components: '[{"name": "rdmaCni", "imageName": "rcma-cni", "Dockerfile": "Dockerfile.nvidia"}]'
+      components: '[{"name": "rdmaCni", "imageName": "rdma-cni", "Dockerfile": "Dockerfile.nvidia"}]'
     secrets:
       registry-username: ${{ secrets.NVCR_USERNAME }}
       registry-token: ${{ secrets.NVCR_TOKEN }}
