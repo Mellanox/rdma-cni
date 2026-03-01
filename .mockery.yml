@@ -15,3 +15,6 @@ packages:
       BasicOps:
         config:
           filename: "RdmaBasicOps.go"
+      QoSManager:
+        config:
+          filename: "RdmaQoS.go"
