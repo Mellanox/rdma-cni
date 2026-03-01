@@ -18,12 +18,18 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"syscall"
 
 	"github.com/vishvananda/netlink"
 )
+
+// configFSMountPoint is the path where configfs is typically mounted.
+const configFSMountPoint = "/sys/kernel/config"
 
 // Get VF PCI device associated with the given MAC.
 // this method compares with administrative MAC for SRIOV configured net devices
@@ -68,4 +74,37 @@ func GetVfPciDevFromMAC(mac string) (string, error) {
 func IsPCIAddress(pciAddress string) bool {
 	re := regexp.MustCompile(`^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$`)
 	return re.MatchString(pciAddress)
+}
+
+// isConfigFSMounted reads /proc/mounts in the current namespace and reports
+// whether configfs is mounted at configFSMountPoint.
+func isConfigFSMounted() (bool, error) {
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[1] == configFSMountPoint && fields[2] == "configfs" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// MountConfigFS mounts configfs at /sys/kernel/config if not already
+// mounted. The mount is done via the mount(2) syscall in the current namespace.
+func MountConfigFS() error {
+	mounted, err := isConfigFSMounted()
+	if err != nil {
+		return fmt.Errorf("check configfs mount: %w", err)
+	}
+	if mounted {
+		return nil
+	}
+
+	if err := syscall.Mount("none", configFSMountPoint, "configfs", 0, ""); err != nil {
+		return fmt.Errorf("mount configfs at %s: %w", configFSMountPoint, err)
+	}
+	return nil
 }
