@@ -22,8 +22,9 @@ import (
 
 type RdmaNetConf struct {
 	types.NetConf
-	DeviceID string  `json:"deviceID"` // PCI address of a VF in valid sysfs format
-	Args     CNIArgs `json:"args"`     // optional arguments passed to CNI as defined in CNI spec 0.2.0
+	DeviceID string  `json:"deviceID"`          // PCI address of a VF in valid sysfs format
+	RDMAQoS  RDMAQoS `json:"rdmaQoS,omitempty"` // RoCE QoS (Quality of Service) to set for the RDMA device
+	Args     CNIArgs `json:"args"`              // optional arguments passed to CNI as defined in CNI spec 0.2.0
 }
 
 type CNIArgs struct {
@@ -33,6 +34,10 @@ type CNIArgs struct {
 type RdmaCNIArgs struct {
 	types.CommonArgs
 	Debug bool `json:"debug"` // Run CNI in debug mode
+}
+type RDMAQoS struct {
+	TOS uint32 `json:"tos"` // RoCE TOS (Type of Service) value to set for the RDMA device
+	TC  uint32 `json:"tc"`  // RoCE TC (traffic class) value to set for the RDMA device
 }
 
 // RDMA Network state struct version
@@ -53,4 +58,6 @@ type RdmaNetState struct {
 	SandboxRdmaDevName string `json:"sandboxRdmaDevName"`
 	// RDMA device name in container
 	ContainerRdmaDevName string `json:"containerRdmaDevName"`
+	// RDMA device QoS
+	RDMAQoS RDMAQoS `json:"rdmaQoS,omitempty"`
 }
