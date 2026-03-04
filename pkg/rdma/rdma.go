@@ -31,6 +31,10 @@ func NewRdmaManager() Manager {
 	return &rdmaManagerNetlink{rdmaOps: newRdmaBasicOps()}
 }
 
+type QoS struct {
+	Tos uint32
+}
+
 type Manager interface {
 	// Move RDMA device from current network namespace to network namespace
 	MoveRdmaDevToNs(rdmaDev string, netNs ns.NetNS) error
@@ -55,6 +59,7 @@ func (rmn *rdmaManagerNetlink) MoveRdmaDevToNs(rdmaDev string, netNs ns.NetNS) e
 	if err != nil {
 		return fmt.Errorf("cannot find RDMA link from name: %s", rdmaDev)
 	}
+
 	err = rmn.rdmaOps.RdmaLinkSetNsFd(rdmaLink, uint32(netNs.Fd()))
 	if err != nil {
 		return fmt.Errorf("failed to move RDMA dev %s to namespace. %v", rdmaDev, err)
@@ -81,4 +86,10 @@ func (rmn *rdmaManagerNetlink) GetSystemRdmaMode() (string, error) {
 // Set RDMA subsystem namespace awareness mode ["exclusive" | "shared"]
 func (rmn *rdmaManagerNetlink) SetSystemRdmaMode(mode string) error {
 	return rmn.rdmaOps.RdmaSystemSetNetnsMode(mode)
+}
+
+// Get RDMA device QoS
+func (rmn *rdmaManagerNetlink) GetRdmaDevQoS(rdmaDev string) (uint32, error) {
+
+	return uint32(0), nil
 }
