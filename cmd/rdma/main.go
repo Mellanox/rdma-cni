@@ -78,6 +78,7 @@ func newNsManager() NsManager {
 
 type rdmaCniPlugin struct {
 	rdmaManager rdma.Manager
+	qosManager  rdma.QoSManager
 	nsManager   NsManager
 	stateCache  cache.StateCache
 }
@@ -148,7 +149,6 @@ func (plugin *rdmaCniPlugin) moveRdmaDevToNs(rdmaDev, nsPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to move RDMA device %s to namespace. %v", rdmaDev, err)
 	}
-
 	return nil
 }
 
@@ -226,29 +226,27 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to get RDMA device for device ID %s: %w", conf.DeviceID, err)
 	}
 
-	qos, err := plugin.getRdmaDevQoS(conf.Args.CNI.RDMAQoS, rdmaDev)
+	qos, err := plugin.qosManager.GetRdmaDevQoS(rdmaDev)
 	if err != nil {
 		return fmt.Errorf("failed to get RDMA device %s QoS: %w", rdmaDev, err)
 	}
-	log.Info().Msgf("RDMA device %s QoS: %d", rdmaDev, qos)
+	log.Info().Msgf("RDMA device %s QoS: %+v", rdmaDev, qos)
 
 	err = plugin.moveRdmaDevToNs(rdmaDev, args.Netns)
 	if err != nil {
 		return fmt.Errorf("failed to move RDMA device %s to namespace. %v", rdmaDev, err)
 	}
 
-	err = plugin.setRdmaDevQoS(args.Netns, rdmaDev, rdmatypes.RDMAQoS{TOS: qos, TC: 0})
+	err = plugin.setRdmaDevQoS(args.Netns, rdmaDev, qos)
 	if err != nil {
 		return fmt.Errorf("failed to set RDMA device %s QoS. %v", rdmaDev, err)
 	}
 
-	// Save RDMA state
-	//todo: Do I need to store QoS in the state?
 	state := rdmatypes.NewRdmaNetState()
 	state.DeviceID = conf.DeviceID
 	state.SandboxRdmaDevName = rdmaDev
 	state.ContainerRdmaDevName = rdmaDev
-	state.RDMAQoS = conf.Args.CNI.RDMAQoS
+	state.RDMAQoS = qos
 	pRef := plugin.stateCache.GetStateRef(conf.Name, args.ContainerID, args.IfName)
 	err = plugin.stateCache.Save(pRef, &state)
 	if err != nil {
@@ -302,10 +300,9 @@ func (plugin *rdmaCniPlugin) CmdDel(args *skel.CmdArgs) error {
 			"failed to restore RDMA device %s to default namespace. %v", rdmaState.ContainerRdmaDevName, err)
 	}
 
-	qos := rdmaState.RDMAQoS
-	err = utils.SetRdmaDevQoS(nil, rdmaState.ContainerRdmaDevName, qos.TOS, qos.TC)
+	err = plugin.qosManager.SetRdmaDevQoS(nil, rdmaState.ContainerRdmaDevName, rdmaState.RDMAQoS)
 	if err != nil {
-		return fmt.Errorf("failed to set RDMA device %s QoS: TOS=%d, TC=%d. %v", rdmaState.ContainerRdmaDevName, qos.TOS, qos.TC, err)
+		return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaState.ContainerRdmaDevName, rdmaState.RDMAQoS, err)
 	}
 
 	err = plugin.stateCache.Delete(pRef)
@@ -339,20 +336,6 @@ func (plugin *rdmaCniPlugin) getRDMADevice(deviceID string) (string, error) {
 	return rdmaDevs[0], nil
 }
 
-func (plugin *rdmaCniPlugin) getRdmaDevQoS(qosConf rdmatypes.RDMAQoS, rdmaDev string) (uint32, error) {
-	log.Info().Msgf("getting RDMA device %s QoS", rdmaDev)
-	qos, err := utils.GetRdmaDevQoS(rdmaDev)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get RDMA device %s QoS: %w", rdmaDev, err)
-	}
-
-	if qos == 0 {
-		qos = qosConf.TOS
-	}
-
-	return qos, nil
-}
-
 func (plugin *rdmaCniPlugin) setRdmaDevQoS(netns string, rdmaDev string, qos rdmatypes.RDMAQoS) error {
 	log.Info().Msgf("targetNS: %s, rdmaDev: %s, qos: %+v", netns, rdmaDev, qos)
 	targetNs, err := plugin.nsManager.GetNS(netns)
@@ -361,7 +344,7 @@ func (plugin *rdmaCniPlugin) setRdmaDevQoS(netns string, rdmaDev string, qos rdm
 	}
 	defer targetNs.Close()
 	targetNs.Do(func(_ ns.NetNS) error {
-		err = utils.SetRdmaDevQoS(targetNs, rdmaDev, qos.TOS, qos.TC)
+		err = plugin.qosManager.SetRdmaDevQoS(targetNs, rdmaDev, qos)
 		if err != nil {
 			return fmt.Errorf("failed to set RDMA device %s QoS: TOS=%d, TC=%d. %v", rdmaDev, qos.TOS, qos.TC, err)
 		}
@@ -403,6 +386,7 @@ func main() {
 	setupLogging()
 	plugin := rdmaCniPlugin{
 		rdmaManager: rdma.NewRdmaManager(),
+		qosManager:  rdma.NewRdmaQoSManager(rdmatypes.RDMAQoS{}),
 		nsManager:   newNsManager(),
 		stateCache:  cache.NewStateCache(),
 	}
