@@ -33,10 +33,10 @@ type CNIArgs struct {
 type RdmaCNIArgs struct {
 	types.CommonArgs
 	// todo: Add QoS support per RDMA device
-	RoCEQoS RoCEQoS `json:"roceQoS,omitempty"` // RoCE QoS (Quality of Service) to set for the RDMA device
+	RDMAQoS RDMAQoS `json:"rdmaQoS,omitempty"` // RoCE QoS (Quality of Service) to set for the RDMA device
 	Debug   bool    `json:"debug"`             // Run CNI in debug mode
 }
-type RoCEQoS struct {
+type RDMAQoS struct {
 	TOS uint32 `json:"tos"` // RoCE TOS (Type of Service) value to set for the RDMA device
 	TC  uint32 `json:"tc"`  // RoCE TC (traffic class) value to set for the RDMA device
 }
@@ -59,4 +59,6 @@ type RdmaNetState struct {
 	SandboxRdmaDevName string `json:"sandboxRdmaDevName"`
 	// RDMA device name in container
 	ContainerRdmaDevName string `json:"containerRdmaDevName"`
+	// RDMA device QoS
+	RDMAQoS RDMAQoS `json:"rdmaQoS,omitempty"`
 }
