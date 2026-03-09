@@ -35,7 +35,7 @@ import (
 	rdmaTypes "github.com/k8snetworkplumbingwg/rdma-cni/pkg/types"
 )
 
-func generateNetConfCmdDel(netName string) rdmaTypes.RdmaNetConf {
+func generateNetConfCmdDel(netName string, qos rdmaTypes.RDMAQoS) rdmaTypes.RdmaNetConf {
 	return rdmaTypes.RdmaNetConf{
 		NetConf: types.NetConf{
 			CNIVersion:    "0.4.0",
@@ -48,10 +48,11 @@ func generateNetConfCmdDel(netName string) rdmaTypes.RdmaNetConf {
 			PrevResult:    nil,
 		},
 		DeviceID: "",
+		Args:     rdmaTypes.CNIArgs{CNI: rdmaTypes.RdmaCNIArgs{RDMAQoS: qos}},
 	}
 }
 
-func generateNetConfCmdAdd(netName, cIfname, deviceID string) rdmaTypes.RdmaNetConf {
+func generateNetConfCmdAdd(netName, cIfname, deviceID string, qos rdmaTypes.RDMAQoS) rdmaTypes.RdmaNetConf {
 	prevResult := current.Result{
 		CNIVersion: "0.4.0",
 		Interfaces: []*current.Interface{{
@@ -79,6 +80,7 @@ func generateNetConfCmdAdd(netName, cIfname, deviceID string) rdmaTypes.RdmaNetC
 			PrevResult:    nil,
 		},
 		DeviceID: deviceID,
+		Args:     rdmaTypes.CNIArgs{CNI: rdmaTypes.RdmaCNIArgs{RDMAQoS: qos}},
 	}
 }
 
@@ -250,11 +252,12 @@ var _ = Describe("Main", func() {
 				qos := rdmaTypes.RDMAQoS{TOS: 96, TC: 26}
 				cnsPath := "/proc/12444/ns/net"
 				cns, _ := dummyNsMgr.GetNS(cnsPath)
-				netconf := generateNetConfCmdAdd(netName, cIfname, pciDev)
+				netconf := generateNetConfCmdAdd(netName, cIfname, pciDev, qos)
 				args := generateArgs(cnsPath, cid, cIfname, &netconf)
 				rdmaMgrMock.On("GetSystemRdmaMode").Return(rdma.RdmaSysModeExclusive, nil)
 				rdmaMgrMock.On("GetRdmaDevsForPciDev", pciDev).Return([]string{rdmaDev}, nil)
 				rdmaMgrMock.On("MoveRdmaDevToNs", rdmaDev, cns).Return(nil)
+				rdmaQoSManagerMock.On("SetRdmaCniQoSConfig", qos).Return(nil)
 				rdmaQoSManagerMock.On("GetRdmaDevQoS", rdmaDev).Return(qos, nil)
 				rdmaQoSManagerMock.On("SetRdmaDevQoS", cns, rdmaDev, qos).Return(nil)
 				stateCacheMock.On("GetStateRef", netName, cid, cIfname).Return(cache.StateRef("some-ref"))
@@ -274,11 +277,12 @@ var _ = Describe("Main", func() {
 				qos := rdmaTypes.RDMAQoS{TOS: 102, TC: 10}
 				cnsPath := "/proc/11142/ns/net"
 				cns, _ := dummyNsMgr.GetNS(cnsPath)
-				netconf := generateNetConfCmdAdd(netName, cIfname, auxDev)
+				netconf := generateNetConfCmdAdd(netName, cIfname, auxDev, qos)
 				args := generateArgs(cnsPath, cid, cIfname, &netconf)
 				rdmaMgrMock.On("GetSystemRdmaMode").Return(rdma.RdmaSysModeExclusive, nil)
 				rdmaMgrMock.On("GetRdmaDevsForAuxDev", auxDev).Return([]string{rdmaDev}, nil)
 				rdmaMgrMock.On("MoveRdmaDevToNs", rdmaDev, cns).Return(nil)
+				rdmaQoSManagerMock.On("SetRdmaCniQoSConfig", qos).Return(nil)
 				rdmaQoSManagerMock.On("GetRdmaDevQoS", rdmaDev).Return(qos, nil)
 				rdmaQoSManagerMock.On("SetRdmaDevQoS", cns, rdmaDev, qos).Return(nil)
 				stateCacheMock.On("GetStateRef", netName, cid, cIfname).Return(cache.StateRef("some-ref"))
@@ -303,10 +307,11 @@ var _ = Describe("Main", func() {
 				cid := "a1b2c3d4e5f6"
 				cnsPath := "/proc/12444/ns/net"
 				cns, _ := dummyNsMgr.GetCurrentNS()
-				qos := rdmaTypes.RDMAQoS{TOS: 96, TC: 0}
+				qos := rdmaTypes.RDMAQoS{TOS: 96, TC: 33}
 				rdmaState := generateRdmaNetState(pciDev, rdmaDev, rdmaDev, qos)
-				netconf := generateNetConfCmdDel(netName)
+				netconf := generateNetConfCmdDel(netName, qos)
 				args := generateArgs(cnsPath, cid, cIfname, &netconf)
+				rdmaQoSManagerMock.On("SetRdmaCniQoSConfig", qos).Return(nil)
 				rdmaQoSManagerMock.On("SetRdmaDevQoS", nil, rdmaDev, qos).Return(nil)
 				stateCacheMock.On("GetStateRef", netName, cid, cIfname).Return(cache.StateRef("some-ref"))
 				stateCacheMock.On("Load", mock.AnythingOfType("cache.StateRef"),
@@ -327,12 +332,13 @@ var _ = Describe("Main", func() {
 				rdmaDev := "mlx5_6"
 				cIfname := "net2"
 				cid := "a1b2c3d4e5f6"
-				qos := rdmaTypes.RDMAQoS{TOS: 102, TC: 0}
+				qos := rdmaTypes.RDMAQoS{TOS: 102, TC: 55}
 				cnsPath := "/proc/12444/ns/net"
 				cns, _ := dummyNsMgr.GetCurrentNS()
 				rdmaState := generateRdmaNetState(auxDev, rdmaDev, rdmaDev, qos)
-				netconf := generateNetConfCmdDel(netName)
+				netconf := generateNetConfCmdDel(netName, qos)
 				args := generateArgs(cnsPath, cid, cIfname, &netconf)
+				rdmaQoSManagerMock.On("SetRdmaCniQoSConfig", qos).Return(nil)
 				rdmaQoSManagerMock.On("SetRdmaDevQoS", nil, rdmaDev, qos).Return(nil)
 				stateCacheMock.On("GetStateRef", netName, cid, cIfname).Return(cache.StateRef("some-ref"))
 				stateCacheMock.On("Load", mock.AnythingOfType("cache.StateRef"),

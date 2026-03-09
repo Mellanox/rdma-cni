@@ -30,15 +30,34 @@ var _ = Describe("RdmaQoSManager", func() {
 
 	JustBeforeEach(func() {
 		qosManager = &rdmaQoSManager{
-			qosConf: rdmatypes.RDMAQoS{TOS: 0, TC: 0},
-			ops:     newFakeRdmaQoSManagerOps(rdmatypes.RDMAQoS{TOS: 96, TC: 0}),
+			qosConf: rdmatypes.RDMAQoS{TOS: 99, TC: 11},
+			ops:     newFakeRdmaQoSManagerOps(rdmatypes.RDMAQoS{TOS: 96, TC: 11}),
 		}
+	})
+
+	Describe("parseUint32", func() {
+		It("treats empty or whitespace-only input as 0", func() {
+			val, err := parseUint32([]byte(""))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(val).To(Equal(uint32(0)))
+			val, err = parseUint32([]byte("\n"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(val).To(Equal(uint32(0)))
+			val, err = parseUint32([]byte("   \t\n"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(val).To(Equal(uint32(0)))
+		})
+		It("parses valid numbers", func() {
+			val, err := parseUint32([]byte("96\n"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(val).To(Equal(uint32(96)))
+		})
 	})
 
 	Describe("Test GetRdmaDevQoS()", func() {
 		Context("Basic Call, no failure from RdmaBasicOps", func() {
 			It("Should pass and return value as provided by rdmaBasicOps", func() {
-				retVal := rdmatypes.RDMAQoS{TOS: 96, TC: 0}
+				retVal := rdmatypes.RDMAQoS{TOS: 96, TC: 11}
 				qos, err := qosManager.GetRdmaDevQoS("mlx5_2")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(qos).To(Equal(retVal))

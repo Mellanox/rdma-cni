@@ -42,11 +42,13 @@ type QoSManager interface {
 	GetRdmaDevQoS(rdmaDev string) (rdmatypes.RDMAQoS, error)
 	// Set RDMA device QoS
 	SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error
+	// Set RDMA CNI QoS configuration
+	SetRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS)
 }
 
-func NewRdmaQoSManager(qosConf rdmatypes.RDMAQoS) QoSManager {
+func NewRdmaQoSManager() QoSManager {
 	return &rdmaQoSManager{
-		qosConf: qosConf,
+		qosConf: rdmatypes.RDMAQoS{},
 		ops:     newRdmaQoSManagerOps(),
 	}
 }
@@ -94,15 +96,20 @@ func (rqm *rdmaQoSManagerOps) GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.
 	// check if /sys/class/infiniband/<rdmaDev>/tc exists
 	if _, err := os.Stat(path.Join(rdmaSysfsPath, rdmaDev, "tc")); err == nil {
 		// read the traffic class value from /sys/class/infiniband/<rdmaDev>/tc/1/traffic_class
+		// file may contain multiple lines; first line is "Global tclass=<value>". If missing or invalid, use 0 so CNI config applies.
 		tc, err := os.ReadFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"))
 		if err != nil {
 			return rdmatypes.RDMAQoS{}, err
 		}
-		// extract number from tc output: "Global tclass=92"
-		tcValStr := strings.TrimPrefix(string(tc), "Global tclass=")
-		tcVal, err = parseUint32([]byte(tcValStr))
-		if err != nil {
-			return rdmatypes.RDMAQoS{}, err
+
+		// if tc is not empty, parse the traffic class value
+		if len(tc) != 0 {
+			firstLine := strings.SplitN(string(tc), "\n", 2)[0]
+			tcValStr := strings.TrimPrefix(strings.TrimSpace(firstLine), "Global tclass=")
+			tcVal, err = parseUint32([]byte(tcValStr))
+			if err != nil {
+				return rdmatypes.RDMAQoS{}, err
+			}
 		}
 	} else {
 		if !os.IsNotExist(err) {
@@ -151,6 +158,12 @@ func (rqm *rdmaQoSManagerOps) SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev st
 	return nil
 }
 
+// SetRdmaCniQoSConfig sets RDMA CNI QoS configuration.
+func (rqm *rdmaQoSManager) SetRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS) {
+	rqm.qosConf = qosConf
+}
+
+// GetRdmaDevQoS gets RDMA device QoS.
 func (rqm *rdmaQoSManager) GetRdmaDevQoS(rdmaDev string) (rdmatypes.RDMAQoS, error) {
 	log.Info().Msgf("getting RDMA device %s QoS", rdmaDev)
 	qos, err := rqm.ops.GetRdmaDevQoSFormSysfs(rdmaDev)
@@ -168,6 +181,7 @@ func (rqm *rdmaQoSManager) GetRdmaDevQoS(rdmaDev string) (rdmatypes.RDMAQoS, err
 	return qos, nil
 }
 
+// SetRdmaDevQoS sets RDMA device QoS.
 func (rqm *rdmaQoSManager) SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
 	return rqm.ops.SetRdmaDevQoSToSysfs(targetNs, rdmaDev, qos)
 }
@@ -191,15 +205,27 @@ func (fqm *fakeRdmaQoSManagerOps) GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmaty
 	tosPath := path.Join(rdmaDevQoSPath, "default_roce_tos")
 	fqm.fakefs.WriteFile(tosPath, []byte(strconv.Itoa(int(fqm.qos.TOS))+"\n"), 0644)
 
-	qos, err := fqm.fakefs.ReadFile(tosPath)
+	tos, err := fqm.fakefs.ReadFile(tosPath)
 	if err != nil {
 		return rdmatypes.RDMAQoS{}, err
 	}
-	tosVal, err := parseUint32(qos)
+	tosVal, err := parseUint32(tos)
 	if err != nil {
 		return rdmatypes.RDMAQoS{}, err
 	}
-	return rdmatypes.RDMAQoS{TOS: tosVal, TC: 0}, nil
+	tcPath := path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class")
+	fqm.fakefs.WriteFile(tcPath, []byte(strconv.Itoa(int(fqm.qos.TC))+"\n"), 0644)
+
+	tc, err := fqm.fakefs.ReadFile(tcPath)
+	if err != nil {
+		return rdmatypes.RDMAQoS{}, err
+	}
+	tcVal, err := parseUint32(tc)
+	if err != nil {
+		return rdmatypes.RDMAQoS{}, err
+	}
+
+	return rdmatypes.RDMAQoS{TOS: tosVal, TC: tcVal}, nil
 }
 
 func (fqm *fakeRdmaQoSManagerOps) SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
@@ -213,12 +239,21 @@ func (fqm *fakeRdmaQoSManagerOps) SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDe
 		return fmt.Errorf("failed to write file %s: %w", path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), err)
 	}
 
+	err = fqm.fakefs.WriteFile(path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class"), []byte(strconv.Itoa(int(qos.TC))), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write file %s: %w", path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class"), err)
+	}
+
 	return nil
 }
 
 // parseUint32 trims trailing newline and parses a 32-bit unsigned integer, rejecting negative or overflow.
+// Empty or whitespace-only input (e.g. from uninitialized sysfs files) is treated as 0 so CNI QoS defaults can apply.
 func parseUint32(b []byte) (uint32, error) {
-	s := string(bytes.TrimSuffix(b, []byte("\n")))
+	s := strings.TrimSpace(string(bytes.TrimSuffix(b, []byte("\n"))))
+	if s == "" {
+		return 0, nil
+	}
 	v, err := strconv.ParseUint(s, 10, 32)
 	if err != nil {
 		return 0, err
