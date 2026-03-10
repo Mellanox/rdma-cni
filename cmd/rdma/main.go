@@ -235,12 +235,17 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	}
 	log.Info().Msgf("RDMA device %s QoS: %+v", rdmaDev, qos)
 
+	err = plugin.qosManager.SetRdmaDevQoS(nil, rdmaDev, rdmatypes.RDMAQoS{TOS: 0, TC: qos.TC})
+	if err != nil {
+		return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaDev, rdmatypes.RDMAQoS{TOS: 0, TC: qos.TC}, err)
+	}
+
 	err = plugin.moveRdmaDevToNs(rdmaDev, args.Netns)
 	if err != nil {
 		return fmt.Errorf("failed to move RDMA device %s to namespace. %v", rdmaDev, err)
 	}
 
-	err = plugin.setRdmaDevQoS(args.Netns, rdmaDev, qos)
+	err = plugin.setRdmaDevQoS(args.Netns, rdmaDev, rdmatypes.RDMAQoS{TOS: qos.TOS, TC: 0})
 	if err != nil {
 		return fmt.Errorf("failed to set RDMA device %s QoS. %v", rdmaDev, err)
 	}

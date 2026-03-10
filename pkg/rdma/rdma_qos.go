@@ -103,9 +103,11 @@ func (rqm *rdmaQoSManagerOps) GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.
 		}
 
 		// if tc is not empty, parse the traffic class value
-		if len(tc) != 0 {
-			firstLine := strings.SplitN(string(tc), "\n", 2)[0]
-			tcValStr := strings.TrimPrefix(strings.TrimSpace(firstLine), "Global tclass=")
+		if len(tc) > 0 {
+			tcValStr := string(tc)
+			if i := strings.Index(tcValStr, "tclass="); i >= 0 {
+				tcValStr = strings.TrimSpace(tcValStr[i+len("tclass="):])
+			}
 			tcVal, err = parseUint32([]byte(tcValStr))
 			if err != nil {
 				return rdmatypes.RDMAQoS{}, err
@@ -128,31 +130,42 @@ func (rqm *rdmaQoSManagerOps) GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.
 // CMA's cma_device is removed and re-created with zeroed default_roce_tos.
 // Setting QoS in the target namespace after the move is therefore required.
 func (rqm *rdmaQoSManagerOps) SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
-	// mount configfs in case executed in non-root network namespace
-	if targetNs != nil {
-		utils.MountConfigFSInNetns(targetNs)
-	}
-	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
-	err := os.MkdirAll(rdmaDevQoSPath, 0755)
-	if err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
-	}
-	err = os.WriteFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), []byte(strconv.Itoa(int(qos.TOS))), 0644)
-	if err != nil {
-		return err
-	}
 
-	// check if /sys/class/infiniband/<rdmaDev>/tc exists
-	if _, err := os.Stat(path.Join(rdmaSysfsPath, rdmaDev, "tc")); err == nil {
-		err = os.WriteFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"), []byte(strconv.Itoa(int(qos.TC))), 0644)
+	if qos.TOS > 0 {
+		// mount configfs in case executed in non-root network namespace
+		if targetNs != nil {
+			utils.MountConfigFSInNetns(targetNs)
+		}
+		rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
+		err := os.MkdirAll(rdmaDevQoSPath, 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
+		}
+		err = os.WriteFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), []byte(strconv.Itoa(int(qos.TOS))), 0644)
 		if err != nil {
 			return err
 		}
-	} else {
-		if !os.IsNotExist(err) {
-			return err
+	}
+
+	if qos.TC > 0 {
+		// check if /sys/class/infiniband/<rdmaDev>/tc exists
+		if _, err := os.Stat(path.Join(rdmaSysfsPath, rdmaDev, "tc")); err == nil {
+			err = os.WriteFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"), []byte(strconv.Itoa(int(qos.TC))), 0644)
+			if err != nil {
+				return err
+			}
+			// read the traffic class value from /sys/class/infiniband/<rdmaDev>/tc/1/traffic_class
+			tc, err := os.ReadFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"))
+			if err != nil {
+				return err
+			}
+			log.Warn().Msgf("TC: '%s'val: '%s' for RDMA device %s.", path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"), tc, rdmaDev)
+		} else {
+			if !os.IsNotExist(err) {
+				return err
+			}
+			log.Warn().Msgf("TC (traffic class) was not applied to RDMA device %s. Skipping TC setting.", rdmaDev)
 		}
-		log.Warn().Msgf("TC (traffic class) was not applied to RDMA device %s. Skipping TC setting.", rdmaDev)
 	}
 
 	return nil
