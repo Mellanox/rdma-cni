@@ -27,7 +27,6 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
-	"github.com/vishvananda/netns"
 )
 
 // configFSMountPoint is the path where configfs is typically mounted.
@@ -94,21 +93,11 @@ func isConfigFSMounted() (bool, error) {
 	return false, nil
 }
 
-// MountConfigFSInNetns mounts configfs at /sys/kernel/config if not already
+// MountConfigFS mounts configfs at /sys/kernel/config if not already
 // mounted, then switches back. Uses github.com/vishvananda/netns to change
 // namespace; the actual mount is done via the mount(2) syscall (netlink does
 // not run arbitrary commands).
-func MountConfigFSInNetns(targetNs ns.NetNS) error {
-	origNs, err := netns.Get()
-	if err != nil {
-		return fmt.Errorf("get current netns: %w", err)
-	}
-
-	if err := netns.Set(netns.NsHandle(targetNs.Fd())); err != nil {
-		return fmt.Errorf("set netns to %q: %w", targetNs.Path(), err)
-	}
-	defer func() { _ = netns.Set(origNs) }()
-
+func MountConfigFS(targetNs ns.NetNS) error {
 	mounted, err := isConfigFSMounted()
 	if err != nil {
 		return fmt.Errorf("check configfs mount: %w", err)

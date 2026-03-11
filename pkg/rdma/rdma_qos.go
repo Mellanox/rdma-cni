@@ -43,7 +43,7 @@ type QoSManager interface {
 	// Set RDMA device QoS
 	SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error
 	// Set RDMA CNI QoS configuration
-	SetRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS)
+	LoadRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS)
 }
 
 func NewRdmaQoSManager() QoSManager {
@@ -134,7 +134,7 @@ func (rqm *rdmaQoSManagerOps) SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev st
 	if qos.TOS > 0 {
 		// mount configfs in case executed in non-root network namespace
 		if targetNs != nil {
-			utils.MountConfigFSInNetns(targetNs)
+			utils.MountConfigFS(targetNs)
 		}
 		rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
 		err := os.MkdirAll(rdmaDevQoSPath, 0755)
@@ -171,8 +171,8 @@ func (rqm *rdmaQoSManagerOps) SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev st
 	return nil
 }
 
-// SetRdmaCniQoSConfig sets RDMA CNI QoS configuration.
-func (rqm *rdmaQoSManager) SetRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS) {
+// LoadRdmaCniQoSConfig sets RDMA CNI QoS configuration.
+func (rqm *rdmaQoSManager) LoadRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS) {
 	rqm.qosConf = qosConf
 }
 

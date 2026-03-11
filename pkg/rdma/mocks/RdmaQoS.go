@@ -97,24 +97,24 @@ func (_c *MockQoSManager_GetRdmaDevQoS_Call) RunAndReturn(run func(rdmaDev strin
 	return _c
 }
 
-// SetRdmaCniQoSConfig provides a mock function for the type MockQoSManager
-func (_mock *MockQoSManager) SetRdmaCniQoSConfig(qosConf types.RDMAQoS) {
+// LoadRdmaCniQoSConfig provides a mock function for the type MockQoSManager
+func (_mock *MockQoSManager) LoadRdmaCniQoSConfig(qosConf types.RDMAQoS) {
 	_mock.Called(qosConf)
 	return
 }
 
-// MockQoSManager_SetRdmaCniQoSConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRdmaCniQoSConfig'
-type MockQoSManager_SetRdmaCniQoSConfig_Call struct {
+// MockQoSManager_LoadRdmaCniQoSConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadRdmaCniQoSConfig'
+type MockQoSManager_LoadRdmaCniQoSConfig_Call struct {
 	*mock.Call
 }
 
-// SetRdmaCniQoSConfig is a helper method to define mock.On call
+// LoadRdmaCniQoSConfig is a helper method to define mock.On call
 //   - qosConf types.RDMAQoS
-func (_e *MockQoSManager_Expecter) SetRdmaCniQoSConfig(qosConf interface{}) *MockQoSManager_SetRdmaCniQoSConfig_Call {
-	return &MockQoSManager_SetRdmaCniQoSConfig_Call{Call: _e.mock.On("SetRdmaCniQoSConfig", qosConf)}
+func (_e *MockQoSManager_Expecter) LoadRdmaCniQoSConfig(qosConf interface{}) *MockQoSManager_LoadRdmaCniQoSConfig_Call {
+	return &MockQoSManager_LoadRdmaCniQoSConfig_Call{Call: _e.mock.On("LoadRdmaCniQoSConfig", qosConf)}
 }
 
-func (_c *MockQoSManager_SetRdmaCniQoSConfig_Call) Run(run func(qosConf types.RDMAQoS)) *MockQoSManager_SetRdmaCniQoSConfig_Call {
+func (_c *MockQoSManager_LoadRdmaCniQoSConfig_Call) Run(run func(qosConf types.RDMAQoS)) *MockQoSManager_LoadRdmaCniQoSConfig_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 types.RDMAQoS
 		if args[0] != nil {
@@ -127,12 +127,12 @@ func (_c *MockQoSManager_SetRdmaCniQoSConfig_Call) Run(run func(qosConf types.RD
 	return _c
 }
 
-func (_c *MockQoSManager_SetRdmaCniQoSConfig_Call) Return() *MockQoSManager_SetRdmaCniQoSConfig_Call {
+func (_c *MockQoSManager_LoadRdmaCniQoSConfig_Call) Return() *MockQoSManager_LoadRdmaCniQoSConfig_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockQoSManager_SetRdmaCniQoSConfig_Call) RunAndReturn(run func(qosConf types.RDMAQoS)) *MockQoSManager_SetRdmaCniQoSConfig_Call {
+func (_c *MockQoSManager_LoadRdmaCniQoSConfig_Call) RunAndReturn(run func(qosConf types.RDMAQoS)) *MockQoSManager_LoadRdmaCniQoSConfig_Call {
 	_c.Run(run)
 	return _c
 }
