@@ -17,9 +17,15 @@
 package rdma
 
 import (
+	"fmt"
+	"path"
+	"strconv"
+
+	"github.com/containernetworking/plugins/pkg/ns"
 	rdmatypes "github.com/k8snetworkplumbingwg/rdma-cni/pkg/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/spf13/afero"
 )
 
 var _ = Describe("RdmaQoSManager", func() {
@@ -31,7 +37,7 @@ var _ = Describe("RdmaQoSManager", func() {
 	JustBeforeEach(func() {
 		qosManager = &rdmaQoSManager{
 			qosConf: rdmatypes.RDMAQoS{TOS: 99, TC: 11},
-			ops:     newFakeRdmaQoSManagerOps(rdmatypes.RDMAQoS{TOS: 96, TC: 11}),
+			ops:     newFakerdmaQoSManagerOps(rdmatypes.RDMAQoS{TOS: 96, TC: 11}),
 		}
 	})
 
@@ -74,3 +80,64 @@ var _ = Describe("RdmaQoSManager", func() {
 		})
 	})
 })
+
+type fakerdmaQoSManagerOps struct {
+	fakefs afero.Afero
+	qos    rdmatypes.RDMAQoS
+}
+
+func newFakerdmaQoSManagerOps(qos rdmatypes.RDMAQoS) rdmaQoSManagerOps {
+	return &fakerdmaQoSManagerOps{fakefs: afero.Afero{Fs: afero.NewMemMapFs()}, qos: qos}
+}
+
+func (fqm *fakerdmaQoSManagerOps) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error) {
+	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev, "ports", "1")
+	err := fqm.fakefs.MkdirAll(rdmaDevQoSPath, 0755)
+	if err != nil {
+		return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
+	}
+
+	tosPath := path.Join(rdmaDevQoSPath, "default_roce_tos")
+	fqm.fakefs.WriteFile(tosPath, []byte(strconv.Itoa(int(fqm.qos.TOS))+"\n"), 0644)
+
+	tos, err := fqm.fakefs.ReadFile(tosPath)
+	if err != nil {
+		return rdmatypes.RDMAQoS{}, err
+	}
+	tosVal, err := parseUint32(tos)
+	if err != nil {
+		return rdmatypes.RDMAQoS{}, err
+	}
+	tcPath := path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class")
+	fqm.fakefs.WriteFile(tcPath, []byte(strconv.Itoa(int(fqm.qos.TC))+"\n"), 0644)
+
+	tc, err := fqm.fakefs.ReadFile(tcPath)
+	if err != nil {
+		return rdmatypes.RDMAQoS{}, err
+	}
+	tcVal, err := parseUint32(tc)
+	if err != nil {
+		return rdmatypes.RDMAQoS{}, err
+	}
+
+	return rdmatypes.RDMAQoS{TOS: tosVal, TC: tcVal}, nil
+}
+
+func (fqm *fakerdmaQoSManagerOps) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
+	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
+	err := fqm.fakefs.MkdirAll(rdmaDevQoSPath, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
+	}
+	err = fqm.fakefs.WriteFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), []byte(strconv.Itoa(int(qos.TOS))), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write file %s: %w", path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), err)
+	}
+
+	err = fqm.fakefs.WriteFile(path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class"), []byte(strconv.Itoa(int(qos.TC))), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write file %s: %w", path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class"), err)
+	}
+
+	return nil
+}

@@ -305,13 +305,11 @@ func (plugin *rdmaCniPlugin) CmdDel(args *skel.CmdArgs) error {
 			"failed to restore RDMA device %s to default namespace. %v", rdmaState.ContainerRdmaDevName, err)
 	}
 
-	// Load RDMA CNI QoS configuration
-	plugin.qosManager.LoadRdmaCniQoSConfig(conf.Args.CNI.RDMAQoS)
-	log.Info().Msgf("RDMA device %s QoS: %+v", rdmaState.ContainerRdmaDevName, conf.Args.CNI.RDMAQoS)
 	err = plugin.qosManager.SetRdmaDevQoS(nil, rdmaState.ContainerRdmaDevName, rdmaState.RDMAQoS)
 	if err != nil {
 		return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaState.ContainerRdmaDevName, rdmaState.RDMAQoS, err)
 	}
+	log.Info().Msgf("RDMA device %s QoS: %+v", rdmaState.ContainerRdmaDevName, rdmaState.RDMAQoS)
 
 	err = plugin.stateCache.Delete(pRef)
 	if err != nil {

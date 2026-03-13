@@ -28,7 +28,6 @@ import (
 	rdmatypes "github.com/k8snetworkplumbingwg/rdma-cni/pkg/types"
 	"github.com/k8snetworkplumbingwg/rdma-cni/pkg/utils"
 	"github.com/rs/zerolog/log"
-	"github.com/spf13/afero"
 )
 
 const (
@@ -49,31 +48,31 @@ type QoSManager interface {
 func NewRdmaQoSManager() QoSManager {
 	return &rdmaQoSManager{
 		qosConf: rdmatypes.RDMAQoS{},
-		ops:     newRdmaQoSManagerOps(),
+		ops:     newrdmaQoSManagerOps(),
 	}
 }
 
 type rdmaQoSManager struct {
 	qosConf rdmatypes.RDMAQoS
-	ops     RDMAQoSManagerOps
+	ops     rdmaQoSManagerOps
 }
 
-type RDMAQoSManagerOps interface {
-	GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error)
-	SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error
+type rdmaQoSManagerOps interface {
+	getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error)
+	setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error
 }
 
-type rdmaQoSManagerOps struct{}
+type rdmaQoSManagerOpsIml struct{}
 
-func newRdmaQoSManagerOps() RDMAQoSManagerOps {
-	return &rdmaQoSManagerOps{}
+func newrdmaQoSManagerOps() rdmaQoSManagerOps {
+	return &rdmaQoSManagerOpsIml{}
 }
 
 // GetRdmaDevQoS returns RDMA QoS for the given RDMA device.
 // 1. create /sys/kernel/config/rdma_cm/<rdmaDev> directory
 // 2. read the default_roce_tos value from /sys/kernel/config/rdma_cm/<rdmaDev>/ports/1/default_roce_tos
 // 3. read the traffic class value from /sys/class/infiniband/<rdmaDev>/tc/1/traffic_class
-func (rqm *rdmaQoSManagerOps) GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error) {
+func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error) {
 	var (
 		tosVal uint32
 		tcVal  uint32
@@ -99,14 +98,15 @@ func (rqm *rdmaQoSManagerOps) GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.
 		// file may contain multiple lines; first line is "Global tclass=<value>". If missing or invalid, use 0 so CNI config applies.
 		tc, err := os.ReadFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"))
 		if err != nil {
-			return rdmatypes.RDMAQoS{}, err
+			return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to read traffic class file for RDMA device %s: %w", rdmaDev, err)
 		}
 
 		// if tc is not empty, parse the traffic class value
 		if len(tc) > 0 {
 			tcValStr := string(tc)
 			if i := strings.Index(tcValStr, "tclass="); i >= 0 {
-				tcValStr = strings.TrimSpace(tcValStr[i+len("tclass="):])
+				// fetch tclass value, handle case where tc is a multi-line string
+				tcValStr = strings.TrimSpace(strings.SplitN(tcValStr[i+len("tclass="):], "\n", 2)[0])
 			}
 			tcVal, err = parseUint32([]byte(tcValStr))
 			if err != nil {
@@ -129,12 +129,15 @@ func (rqm *rdmaQoSManagerOps) GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.
 // to another netns via netlink.
 // CMA's cma_device is removed and re-created with zeroed default_roce_tos.
 // Setting QoS in the target namespace after the move is therefore required.
-func (rqm *rdmaQoSManagerOps) SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
+func (rqm *rdmaQoSManagerOpsIml) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
 
 	if qos.TOS > 0 {
 		// mount configfs in case executed in non-root network namespace
 		if targetNs != nil {
-			utils.MountConfigFS(targetNs)
+			err := utils.MountConfigFS()
+			if err != nil {
+				return fmt.Errorf("failed to mount configfs in target namespace: %w", err)
+			}
 		}
 		rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
 		err := os.MkdirAll(rdmaDevQoSPath, 0755)
@@ -179,7 +182,7 @@ func (rqm *rdmaQoSManager) LoadRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS) {
 // GetRdmaDevQoS gets RDMA device QoS.
 func (rqm *rdmaQoSManager) GetRdmaDevQoS(rdmaDev string) (rdmatypes.RDMAQoS, error) {
 	log.Info().Msgf("getting RDMA device %s QoS", rdmaDev)
-	qos, err := rqm.ops.GetRdmaDevQoSFormSysfs(rdmaDev)
+	qos, err := rqm.ops.getRdmaDevQoSFormSysfs(rdmaDev)
 	if err != nil {
 		return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to get RDMA device %s QoS: %w", rdmaDev, err)
 	}
@@ -196,68 +199,7 @@ func (rqm *rdmaQoSManager) GetRdmaDevQoS(rdmaDev string) (rdmatypes.RDMAQoS, err
 
 // SetRdmaDevQoS sets RDMA device QoS.
 func (rqm *rdmaQoSManager) SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
-	return rqm.ops.SetRdmaDevQoSToSysfs(targetNs, rdmaDev, qos)
-}
-
-type fakeRdmaQoSManagerOps struct {
-	fakefs afero.Afero
-	qos    rdmatypes.RDMAQoS
-}
-
-func newFakeRdmaQoSManagerOps(qos rdmatypes.RDMAQoS) RDMAQoSManagerOps {
-	return &fakeRdmaQoSManagerOps{fakefs: afero.Afero{Fs: afero.NewMemMapFs()}, qos: qos}
-}
-
-func (fqm *fakeRdmaQoSManagerOps) GetRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error) {
-	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev, "ports", "1")
-	err := fqm.fakefs.MkdirAll(rdmaDevQoSPath, 0755)
-	if err != nil {
-		return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
-	}
-
-	tosPath := path.Join(rdmaDevQoSPath, "default_roce_tos")
-	fqm.fakefs.WriteFile(tosPath, []byte(strconv.Itoa(int(fqm.qos.TOS))+"\n"), 0644)
-
-	tos, err := fqm.fakefs.ReadFile(tosPath)
-	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
-	}
-	tosVal, err := parseUint32(tos)
-	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
-	}
-	tcPath := path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class")
-	fqm.fakefs.WriteFile(tcPath, []byte(strconv.Itoa(int(fqm.qos.TC))+"\n"), 0644)
-
-	tc, err := fqm.fakefs.ReadFile(tcPath)
-	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
-	}
-	tcVal, err := parseUint32(tc)
-	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
-	}
-
-	return rdmatypes.RDMAQoS{TOS: tosVal, TC: tcVal}, nil
-}
-
-func (fqm *fakeRdmaQoSManagerOps) SetRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
-	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
-	err := fqm.fakefs.MkdirAll(rdmaDevQoSPath, 0755)
-	if err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
-	}
-	err = fqm.fakefs.WriteFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), []byte(strconv.Itoa(int(qos.TOS))), 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write file %s: %w", path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), err)
-	}
-
-	err = fqm.fakefs.WriteFile(path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class"), []byte(strconv.Itoa(int(qos.TC))), 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write file %s: %w", path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class"), err)
-	}
-
-	return nil
+	return rqm.ops.setRdmaDevQoSToSysfs(targetNs, rdmaDev, qos)
 }
 
 // parseUint32 trims trailing newline and parses a 32-bit unsigned integer, rejecting negative or overflow.

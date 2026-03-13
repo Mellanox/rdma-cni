@@ -25,7 +25,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
 )
 
@@ -94,10 +93,8 @@ func isConfigFSMounted() (bool, error) {
 }
 
 // MountConfigFS mounts configfs at /sys/kernel/config if not already
-// mounted, then switches back. Uses github.com/vishvananda/netns to change
-// namespace; the actual mount is done via the mount(2) syscall (netlink does
-// not run arbitrary commands).
-func MountConfigFS(targetNs ns.NetNS) error {
+// mounted. The mount is done via the mount(2) syscall in the current namespace.
+func MountConfigFS() error {
 	mounted, err := isConfigFSMounted()
 	if err != nil {
 		return fmt.Errorf("check configfs mount: %w", err)
