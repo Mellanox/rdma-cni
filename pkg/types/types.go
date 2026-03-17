@@ -33,7 +33,8 @@ type CNIArgs struct {
 
 type RdmaCNIArgs struct {
 	types.CommonArgs
-	Debug bool `json:"debug"` // Run CNI in debug mode
+	RDMADeviceName string `json:"rdmaDeviceName,omitempty"` // user can specify a custom RDMA device name through the CNI args
+	Debug          bool   `json:"debug"`                    // Run CNI in debug mode
 }
 type RDMAQoS struct {
 	TOS uint32 `json:"tos"` // RoCE TOS (Type of Service) value to set for the RDMA device

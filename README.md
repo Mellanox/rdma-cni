@@ -92,6 +92,23 @@ Set default RoCE **TOS** (Type of Service) and **TC** (traffic class) for the RD
 
 > __*Note:*__ `"args"` is optional. `"rdmaQoS"` is optional; include `tos` and/or `tc` as needed for your fabric QoS.
 
+### RDMADeviceName (optional)
+Optional `rdmaDeviceName` (under `args.cni`) allow users to set custom RDMA device name. Upon `cmdDel` original RDMA device name will be restored.
+
+```json
+{
+  "cniVersion": "0.3.1",
+  "type": "rdma",
+  "args": {
+    "cni": {
+      "rdmaDeviceName": "custom-name",
+      "debug": true
+    }
+  }
+}
+```
+> __*Note:*__ `rdmaDeviceName` is optional
+
 # Deployment
 
 ## System configuration
