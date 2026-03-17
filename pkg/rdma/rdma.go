@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -27,6 +28,8 @@ type Manager interface {
 	GetSystemRdmaMode() (string, error)
 	// Set RDMA subsystem namespace awareness mode ["exclusive" | "shared"]
 	SetSystemRdmaMode(mode string) error
+	// Set RDMA device name
+	SetRdmaDevName(rdmaDev string, name string) error
 }
 
 type rdmaManagerNetlink struct {
@@ -65,4 +68,24 @@ func (rmn *rdmaManagerNetlink) GetSystemRdmaMode() (string, error) {
 // Set RDMA subsystem namespace awareness mode ["exclusive" | "shared"]
 func (rmn *rdmaManagerNetlink) SetSystemRdmaMode(mode string) error {
 	return rmn.rdmaOps.RdmaSystemSetNetnsMode(mode)
+}
+
+// Set RDMA device name
+func (rmn *rdmaManagerNetlink) SetRdmaDevName(rdmaDev string, name string) error {
+	log.Info().Msgf("setting RDMA device %s name to %s", rdmaDev, name)
+	// check if the RDMA device name is already set
+	rdmaLink, err := rmn.rdmaOps.RdmaLinkByName(name)
+	if err != nil {
+		return fmt.Errorf("cannot find RDMA link from name: %s", rdmaDev)
+	}
+	// if the RDMA device name is already set, do nothing and return nil
+	if rdmaLink.Attrs.Name == name {
+		return nil
+	}
+	// fetch the RDMA link from given by device id
+	rdmaLink, err = rmn.rdmaOps.RdmaLinkByName(rdmaDev)
+	if err != nil {
+		return fmt.Errorf("cannot find RDMA link from name: %s", rdmaDev)
+	}
+	return rmn.rdmaOps.RdmaLinkSetName(rdmaLink, name)
 }

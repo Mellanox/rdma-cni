@@ -165,8 +165,11 @@ func (plugin *rdmaCniPlugin) moveRdmaDevFromNs(rdmaDev, nsPath string) error {
 
 func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	log.Info().Msgf("RDMA-CNI: cmdAdd")
-	var err error
-	var conf *rdmatypes.RdmaNetConf
+	var (
+		err            error
+		conf           *rdmatypes.RdmaNetConf
+		currentRdmaDev string
+	)
 	conf, err = plugin.parseConf(args.StdinData, args.Args)
 	if err != nil {
 		return err
@@ -210,6 +213,16 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	if err != nil {
 		return fmt.Errorf("failed to get RDMA device for device ID %s: %w", conf.DeviceID, err)
 	}
+	currentRdmaDev = rdmaDev
+
+	// user can specify a custom RDMA device name through the CNI args
+	err = plugin.setRdmaDevName(rdmaDev, conf.Args.CNI.RDMADeviceName)
+	if err != nil {
+		return fmt.Errorf("failed to set RDMA device %s name: %w", rdmaDev, err)
+	}
+	if conf.Args.CNI.RDMADeviceName != "" {
+		rdmaDev = conf.Args.CNI.RDMADeviceName
+	}
 
 	err = plugin.moveRdmaDevToNs(rdmaDev, args.Netns)
 	if err != nil {
@@ -219,8 +232,8 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	// Save RDMA state
 	state := rdmatypes.NewRdmaNetState()
 	state.DeviceID = conf.DeviceID
-	state.SandboxRdmaDevName = rdmaDev
-	state.ContainerRdmaDevName = rdmaDev
+	state.SandboxRdmaDevName = currentRdmaDev
+	state.ContainerRdmaDevName = currentRdmaDev
 	pRef := plugin.stateCache.GetStateRef(conf.Name, args.ContainerID, args.IfName)
 	err = plugin.stateCache.Save(pRef, &state)
 	if err != nil {
@@ -268,6 +281,8 @@ func (plugin *rdmaCniPlugin) CmdDel(args *skel.CmdArgs) error {
 	}
 
 	// Move RDMA device to default namespace
+	// upon RDMA device restore, the RDMA device name will be set to its original name
+	// and not the custom name specified by the user in the CNI args
 	err = plugin.moveRdmaDevFromNs(rdmaState.ContainerRdmaDevName, args.Netns)
 	if err != nil {
 		return fmt.Errorf(
@@ -303,6 +318,16 @@ func (plugin *rdmaCniPlugin) getRDMADevice(deviceID string) (string, error) {
 	}
 
 	return rdmaDevs[0], nil
+}
+
+// setRdmaDevName sets the RDMA device name according to the user's CNI args
+func (plugin *rdmaCniPlugin) setRdmaDevName(rdmaDev string, rdmaDevName string) error {
+	log.Info().Msgf("setting RDMA device %s name to %s", rdmaDev, rdmaDevName)
+	err := plugin.rdmaManager.SetRdmaDevName(rdmaDev, rdmaDevName)
+	if err != nil {
+		return fmt.Errorf("failed to set RDMA device %s name: %w", rdmaDev, err)
+	}
+	return nil
 }
 
 func setupLogging() {
