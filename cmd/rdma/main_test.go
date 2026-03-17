@@ -51,7 +51,7 @@ func generateNetConfCmdDel(netName string) rdmaTypes.RdmaNetConf {
 	}
 }
 
-func generateNetConfCmdAdd(netName, cIfname, deviceID string) rdmaTypes.RdmaNetConf {
+func generateNetConfCmdAdd(netName, cIfname, deviceID string, rdmaDevName string) rdmaTypes.RdmaNetConf {
 	prevResult := current.Result{
 		CNIVersion: "0.4.0",
 		Interfaces: []*current.Interface{{
@@ -79,6 +79,7 @@ func generateNetConfCmdAdd(netName, cIfname, deviceID string) rdmaTypes.RdmaNetC
 			PrevResult:    nil,
 		},
 		DeviceID: deviceID,
+		Args:     rdmaTypes.CNIArgs{CNI: rdmaTypes.RdmaCNIArgs{RDMADeviceName: rdmaDevName}},
 	}
 }
 
@@ -246,10 +247,11 @@ var _ = Describe("Main", func() {
 				cid := "a1b2c3d4e5f6"
 				cnsPath := "/proc/12444/ns/net"
 				cns, _ := dummyNsMgr.GetNS(cnsPath)
-				netconf := generateNetConfCmdAdd(netName, cIfname, pciDev)
+				netconf := generateNetConfCmdAdd(netName, cIfname, pciDev, "")
 				args := generateArgs(cnsPath, cid, cIfname, &netconf)
 				rdmaMgrMock.On("GetSystemRdmaMode").Return(rdma.RdmaSysModeExclusive, nil)
 				rdmaMgrMock.On("GetRdmaDevsForPciDev", pciDev).Return([]string{rdmaDev}, nil)
+				rdmaMgrMock.On("SetRdmaDevName", rdmaDev, netconf.Args.CNI.RDMADeviceName).Return(nil)
 				rdmaMgrMock.On("MoveRdmaDevToNs", rdmaDev, cns).Return(nil)
 				stateCacheMock.On("GetStateRef", netName, cid, cIfname).Return(cache.StateRef("some-ref"))
 				expectedState := generateRdmaNetState(pciDev, rdmaDev, rdmaDev)
@@ -267,13 +269,39 @@ var _ = Describe("Main", func() {
 				cid := "a6b5c4d3e2f1"
 				cnsPath := "/proc/11142/ns/net"
 				cns, _ := dummyNsMgr.GetNS(cnsPath)
-				netconf := generateNetConfCmdAdd(netName, cIfname, auxDev)
+				netconf := generateNetConfCmdAdd(netName, cIfname, auxDev, "")
 				args := generateArgs(cnsPath, cid, cIfname, &netconf)
 				rdmaMgrMock.On("GetSystemRdmaMode").Return(rdma.RdmaSysModeExclusive, nil)
 				rdmaMgrMock.On("GetRdmaDevsForAuxDev", auxDev).Return([]string{rdmaDev}, nil)
+				rdmaMgrMock.On("SetRdmaDevName", rdmaDev, netconf.Args.CNI.RDMADeviceName).Return(nil)
 				rdmaMgrMock.On("MoveRdmaDevToNs", rdmaDev, cns).Return(nil)
 				stateCacheMock.On("GetStateRef", netName, cid, cIfname).Return(cache.StateRef("some-ref"))
 				expectedState := generateRdmaNetState(auxDev, rdmaDev, rdmaDev)
+				stateCacheMock.On("Save", mock.AnythingOfType("cache.StateRef"), &expectedState).Return(nil)
+				err := plugin.CmdAdd(&args)
+				Expect(err).ToNot(HaveOccurred())
+				rdmaMgrMock.AssertExpectations(t)
+				stateCacheMock.AssertExpectations(t)
+			})
+			It("Should succeed and move Rdma device associated with provided PCI DeviceID to Namespace with custom RDMA device name", func() {
+				pciDev := "0000:04:00.5"
+				netName := "rdma-net"
+				rdmaDev := "mlx5_4"
+				currentRdmaDev := "mlx5_4"
+				customRdmaDev := "custom-rdma"
+				cIfname := "net1"
+				cid := "a1b2c3d4e5f6"
+				cnsPath := "/proc/12444/ns/net"
+				cns, _ := dummyNsMgr.GetNS(cnsPath)
+				netconf := generateNetConfCmdAdd(netName, cIfname, pciDev, customRdmaDev)
+				args := generateArgs(cnsPath, cid, cIfname, &netconf)
+				rdmaMgrMock.On("GetSystemRdmaMode").Return(rdma.RdmaSysModeExclusive, nil)
+				rdmaMgrMock.On("GetRdmaDevsForPciDev", pciDev).Return([]string{rdmaDev}, nil)
+				rdmaMgrMock.On("SetRdmaDevName", rdmaDev, netconf.Args.CNI.RDMADeviceName).Return(nil)
+				rdmaDev = netconf.Args.CNI.RDMADeviceName
+				rdmaMgrMock.On("MoveRdmaDevToNs", rdmaDev, cns).Return(nil)
+				stateCacheMock.On("GetStateRef", netName, cid, cIfname).Return(cache.StateRef("some-ref"))
+				expectedState := generateRdmaNetState(pciDev, currentRdmaDev, currentRdmaDev)
 				stateCacheMock.On("Save", mock.AnythingOfType("cache.StateRef"), &expectedState).Return(nil)
 				err := plugin.CmdAdd(&args)
 				Expect(err).ToNot(HaveOccurred())
