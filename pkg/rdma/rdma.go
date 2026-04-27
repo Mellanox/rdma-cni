@@ -17,6 +17,7 @@
 package rdma
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -26,6 +27,10 @@ import (
 const (
 	RdmaSysModeExclusive = "exclusive"
 	RdmaSysModeShared    = "shared"
+)
+
+var (
+	ErrRdmaDeviceNotFound = errors.New("RDMA device not found")
 )
 
 func NewRdmaManager() Manager {
@@ -56,7 +61,7 @@ type rdmaManagerNetlink struct {
 func (rmn *rdmaManagerNetlink) MoveRdmaDevToNs(rdmaDev string, netNs ns.NetNS) error {
 	rdmaLink, err := rmn.rdmaOps.RdmaLinkByName(rdmaDev)
 	if err != nil {
-		return fmt.Errorf("cannot find RDMA link from name: %s", rdmaDev)
+		return fmt.Errorf("cannot find RDMA link from name: %s: %w", rdmaDev, ErrRdmaDeviceNotFound)
 	}
 	err = rmn.rdmaOps.RdmaLinkSetNsFd(rdmaLink, uint32(netNs.Fd()))
 	if err != nil {
@@ -99,7 +104,7 @@ func (rmn *rdmaManagerNetlink) SetRdmaDevName(rdmaDev string, name string) error
 	// fetch the RDMA link from given by device id
 	rdmaLink, err := rmn.rdmaOps.RdmaLinkByName(rdmaDev)
 	if err != nil {
-		return fmt.Errorf("cannot find RDMA link from name: %s", rdmaDev)
+		return fmt.Errorf("cannot find RDMA link from name: %s. %w", rdmaDev, ErrRdmaDeviceNotFound)
 	}
 	return rmn.rdmaOps.RdmaLinkSetName(rdmaLink, name)
 }
