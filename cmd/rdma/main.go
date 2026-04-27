@@ -51,9 +51,10 @@ var (
 )
 
 var (
-	version = "master@git"
-	commit  = "unknown commit"
-	date    = "unknown date"
+	version               = "master@git"
+	commit                = "unknown commit"
+	date                  = "unknown date"
+	skipRdmaDeviceRestore = false
 )
 
 const (
@@ -180,7 +181,7 @@ func (plugin *rdmaCniPlugin) moveRdmaDevFromNs(rdmaDev, nsPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to move RDMA device %s to default namespace. %v", rdmaDev, err)
 	}
-	return err
+	return nil
 }
 
 func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
@@ -229,7 +230,7 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	}
 
 	// Get RDMA device name from netdevice or CNI args
-	rdmaDev, origRdmaDev, err := plugin.getRDMADevice(result, conf.Args.CNI, conf.DeviceID)
+	rdmaDev, origRdmaDev, err := plugin.getRDMADevice(conf.Args.CNI.RDMADeviceName, args.IfName, conf.DeviceID)
 	if err != nil {
 		return fmt.Errorf("failed to get RDMA device for device ID %s: %w", conf.DeviceID, err)
 	}
@@ -319,22 +320,36 @@ func (plugin *rdmaCniPlugin) CmdDel(args *skel.CmdArgs) error {
 	// Move RDMA device to default namespace
 	// upon RDMA device restore, the RDMA device name will be set to its original name
 	// revoking custom RDMA device name applied in container network namespace.
-	err = plugin.moveRdmaDevFromNs(rdmaState.ContainerRdmaDevName, args.Netns)
+	rdmaDev := rdmaState.ContainerRdmaDevName
+	err = plugin.moveRdmaDevFromNs(rdmaDev, args.Netns)
 	if err != nil {
-		return fmt.Errorf(
-			"failed to restore RDMA device %s to default namespace. %v", rdmaState.ContainerRdmaDevName, err)
+		// if RDMA device is not found in container namespace, device was probably removed by a preceding cni CMD_DEL call
+		if errors.Is(err, rdma.ErrRdmaDeviceNotFound) {
+			log.Warn().Msgf("RDMA device %s not found in default namespace. %v", rdmaDev, err)
+			rdmaDev = rdmaState.SandboxRdmaDevName
+			skipRdmaDeviceRestore = true
+		} else {
+			return fmt.Errorf(
+				"failed to restore RDMA device %s to default namespace. %v", rdmaDev, err)
+		}
 	}
 	// restore RDMA device QoS once the RDMA device is restored to the default namespace
-	err = plugin.qosManager.SetRdmaDevQoS(nil, rdmaState.ContainerRdmaDevName, rdmaState.RDMAQoS)
+	err = plugin.qosManager.SetRdmaDevQoS(nil, rdmaDev, rdmaState.RDMAQoS)
 	if err != nil {
-		return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaState.ContainerRdmaDevName, rdmaState.RDMAQoS, err)
+		if errors.Is(err, rdma.ErrRdmaDeviceNotFound) {
+			log.Warn().Msgf("RDMA device %s not found. Restoring QoS failed. %v", rdmaDev, err)
+			return nil
+		}
+		return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaDev, rdmaState.RDMAQoS, err)
 	}
-	log.Info().Msgf("RDMA device %s QoS: %+v", rdmaState.ContainerRdmaDevName, rdmaState.RDMAQoS)
+	log.Info().Msgf("RDMA device %s QoS: %+v", rdmaDev, rdmaState.RDMAQoS)
 
-	// Restore root namespace RDMA device name stored in cache
-	err = plugin.setRdmaDevName(rdmaState.ContainerRdmaDevName, rdmaState.SandboxRdmaDevName)
-	if err != nil {
-		return fmt.Errorf("failed to set RDMA device %s name: %w", rdmaState.ContainerRdmaDevName, err)
+	if !skipRdmaDeviceRestore {
+		// Restore root namespace RDMA device name stored in cache
+		err = plugin.setRdmaDevName(rdmaState.ContainerRdmaDevName, rdmaState.SandboxRdmaDevName)
+		if err != nil {
+			return fmt.Errorf("failed to set RDMA device %s name: %w", rdmaState.ContainerRdmaDevName, err)
+		}
 	}
 
 	err = plugin.stateCache.Delete(pRef)
@@ -346,8 +361,8 @@ func (plugin *rdmaCniPlugin) CmdDel(args *skel.CmdArgs) error {
 
 // getRDMADevice returns CNI interface name or user provided name as the RDMA device name.
 // Original RDMA device name is returned to restore the RDMA device name upon CmdDel.
-func (plugin *rdmaCniPlugin) getRDMADevice(prev *current.Result,
-	args rdmatypes.RdmaCNIArgs, deviceID string) (string, string, error) {
+func (plugin *rdmaCniPlugin) getRDMADevice(rdmaDeviceName,
+	ifName, deviceID string) (string, string, error) {
 	var (
 		rdmaDevs    []string
 		origRdmaDev string
@@ -374,11 +389,11 @@ func (plugin *rdmaCniPlugin) getRDMADevice(prev *current.Result,
 	origRdmaDev = rdmaDevs[0]
 
 	// use CNI interface name or user provided name as the RDMA device name
-	if prev != nil && len(prev.Interfaces) > 0 && prev.Interfaces[0].Name != "" {
-		rdmaDevs[0] = rdmaDevPrefix + prev.Interfaces[0].Name
+	if ifName != "" {
+		rdmaDevs[0] = rdmaDevPrefix + ifName
 	}
-	if args.RDMADeviceName != "" {
-		rdmaDevs[0] = args.RDMADeviceName
+	if rdmaDeviceName != "" {
+		rdmaDevs[0] = rdmaDeviceName
 	}
 
 	return rdmaDevs[0], origRdmaDev, nil
@@ -393,6 +408,10 @@ func (plugin *rdmaCniPlugin) setRdmaDevName(origRdmaDev, rdmaDev string) error {
 	}
 	err := plugin.rdmaManager.SetRdmaDevName(origRdmaDev, rdmaDev)
 	if err != nil {
+		if errors.Is(err, rdma.ErrRdmaDeviceNotFound) {
+			log.Warn().Msgf("RDMA device %s not found. %v", origRdmaDev, err)
+			return nil
+		}
 		return fmt.Errorf("failed to set RDMA device %s name to %s: %w", origRdmaDev, rdmaDev, err)
 	}
 	return nil
