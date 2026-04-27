@@ -18,11 +18,13 @@ package rdma
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	rdmatypes "github.com/k8snetworkplumbingwg/rdma-cni/pkg/types"
@@ -145,7 +147,10 @@ func (rqm *rdmaQoSManagerOpsIml) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev
 	}
 	err = os.WriteFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), []byte(strconv.Itoa(int(qos.TOS))), 0644)
 	if err != nil {
-		return err
+		if errors.Is(err, syscall.ENODEV) {
+			return fmt.Errorf("rdma device %s not found while writing default_roce_tos: %w",
+				rdmaDev, errors.Join(ErrRdmaDeviceNotFound, err))
+		}
 	}
 
 	// check if /sys/class/infiniband/<rdmaDev>/tc exists
