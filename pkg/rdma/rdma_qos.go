@@ -40,28 +40,28 @@ const (
 // QoSManager interface for managing RDMA device QoS configuration.
 type QoSManager interface {
 	// Get RDMA device QoS
-	GetRdmaDevQoS(rdmaDev string) (rdmatypes.RDMAQoS, rdmatypes.RDMAQoS, error)
+	GetRdmaDevQoS(rdmaDev string) (*rdmatypes.RDMAQoS, *rdmatypes.RDMAQoS, error)
 	// Set RDMA device QoS
-	SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error
+	SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos *rdmatypes.RDMAQoS) error
 	// Set RDMA CNI QoS configuration
-	LoadRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS)
+	LoadRdmaCniQoSConfig(qosConf *rdmatypes.RDMAQoS)
 }
 
 func NewRdmaQoSManager() QoSManager {
 	return &rdmaQoSManager{
-		qosConf: rdmatypes.RDMAQoS{},
+		qosConf: &rdmatypes.RDMAQoS{},
 		ops:     newrdmaQoSManagerOps(),
 	}
 }
 
 type rdmaQoSManager struct {
-	qosConf rdmatypes.RDMAQoS
+	qosConf *rdmatypes.RDMAQoS
 	ops     rdmaQoSManagerOps
 }
 
 type rdmaQoSManagerOps interface {
-	getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error)
-	setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error
+	getRdmaDevQoSFormSysfs(rdmaDev string) (*rdmatypes.RDMAQoS, error)
+	setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos *rdmatypes.RDMAQoS) error
 }
 
 type rdmaQoSManagerOpsIml struct{}
@@ -74,7 +74,7 @@ func newrdmaQoSManagerOps() rdmaQoSManagerOps {
 // 1. create /sys/kernel/config/rdma_cm/<rdmaDev> directory
 // 2. read the default_roce_tos value from /sys/kernel/config/rdma_cm/<rdmaDev>/ports/1/default_roce_tos
 // 3. read the traffic class value from /sys/class/infiniband/<rdmaDev>/tc/1/traffic_class
-func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error) {
+func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (*rdmatypes.RDMAQoS, error) {
 	var (
 		tosVal uint32
 		tcVal  uint32
@@ -82,16 +82,16 @@ func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatyp
 	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
 	err := os.MkdirAll(rdmaDevQoSPath, 0755)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
+		return nil, fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
 	}
 	tos, err := os.ReadFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"))
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
+		return nil, err
 	}
 
 	tosVal, err = parseUint32(tos)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
+		return nil, err
 	}
 
 	// check if /sys/class/infiniband/<rdmaDev>/tc exists
@@ -100,7 +100,7 @@ func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatyp
 		// file may contain multiple lines; first line is "Global tclass=<value>". If missing or invalid, use 0 so CNI config applies.
 		tc, err := os.ReadFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"))
 		if err != nil {
-			return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to read traffic class file for RDMA device %s: %w", rdmaDev, err)
+			return nil, fmt.Errorf("failed to read traffic class file for RDMA device %s: %w", rdmaDev, err)
 		}
 
 		// if tc is not empty, parse the traffic class value
@@ -112,17 +112,17 @@ func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatyp
 			}
 			tcVal, err = parseUint32([]byte(tcValStr))
 			if err != nil {
-				return rdmatypes.RDMAQoS{}, err
+				return nil, err
 			}
 		}
 	} else {
 		if !os.IsNotExist(err) {
-			return rdmatypes.RDMAQoS{}, err
+			return nil, err
 		}
 		log.Warn().Msgf("TC (traffic class) was not found for RDMA device %s.", rdmaDev)
 	}
 
-	return rdmatypes.RDMAQoS{TOS: tosVal, TC: tcVal}, nil
+	return &rdmatypes.RDMAQoS{TOS: tosVal, TC: tcVal}, nil
 
 }
 
@@ -131,7 +131,7 @@ func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatyp
 // to another netns via netlink.
 // CMA's cma_device is removed and re-created with zeroed default_roce_tos.
 // Setting QoS in the target namespace after the move is therefore required.
-func (rqm *rdmaQoSManagerOpsIml) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
+func (rqm *rdmaQoSManagerOpsIml) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos *rdmatypes.RDMAQoS) error {
 
 	// mount configfs in case executed in non-root network namespace
 	if targetNs != nil {
@@ -176,23 +176,26 @@ func (rqm *rdmaQoSManagerOpsIml) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev
 }
 
 // LoadRdmaCniQoSConfig sets RDMA CNI QoS configuration.
-func (rqm *rdmaQoSManager) LoadRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS) {
+func (rqm *rdmaQoSManager) LoadRdmaCniQoSConfig(qosConf *rdmatypes.RDMAQoS) {
 	rqm.qosConf = qosConf
 }
 
 // GetRdmaDevQoS gets RDMA device host QoS and CNI QoS configuration.
-func (rqm *rdmaQoSManager) GetRdmaDevQoS(rdmaDev string) (rdmatypes.RDMAQoS, rdmatypes.RDMAQoS, error) {
+func (rqm *rdmaQoSManager) GetRdmaDevQoS(rdmaDev string) (*rdmatypes.RDMAQoS, *rdmatypes.RDMAQoS, error) {
 	log.Info().Msgf("getting RDMA device %s QoS", rdmaDev)
 	hostQos, err := rqm.ops.getRdmaDevQoSFormSysfs(rdmaDev)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, rdmatypes.RDMAQoS{}, fmt.Errorf("failed to get RDMA device %s host QoS: %w", rdmaDev, err)
+		return nil, nil, fmt.Errorf("failed to get RDMA device %s host QoS: %w", rdmaDev, err)
 	}
 
 	return hostQos, rqm.qosConf, nil
 }
 
 // SetRdmaDevQoS sets RDMA device QoS.
-func (rqm *rdmaQoSManager) SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
+func (rqm *rdmaQoSManager) SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos *rdmatypes.RDMAQoS) error {
+	if qos == nil {
+		return nil
+	}
 	return rqm.ops.setRdmaDevQoSToSysfs(targetNs, rdmaDev, qos)
 }
 

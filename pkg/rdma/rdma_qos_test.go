@@ -36,8 +36,8 @@ var _ = Describe("RdmaQoSManager", func() {
 
 	JustBeforeEach(func() {
 		qosManager = &rdmaQoSManager{
-			qosConf: rdmatypes.RDMAQoS{TOS: 99, TC: 11},
-			ops:     newFakerdmaQoSManagerOps(rdmatypes.RDMAQoS{TOS: 55, TC: 11}),
+			qosConf: &rdmatypes.RDMAQoS{TOS: 99, TC: 11},
+			ops:     newFakerdmaQoSManagerOps(&rdmatypes.RDMAQoS{TOS: 55, TC: 11}),
 		}
 	})
 
@@ -63,11 +63,11 @@ var _ = Describe("RdmaQoSManager", func() {
 	Describe("Test GetRdmaDevQoS()", func() {
 		Context("Basic Call, no failure from RdmaBasicOps", func() {
 			It("Should pass and return value as provided by rdmaBasicOps", func() {
-				retVal := rdmatypes.RDMAQoS{TOS: 99, TC: 11}
+				retVal := &rdmatypes.RDMAQoS{TOS: 99, TC: 11}
 				hostQos, qos, err := qosManager.GetRdmaDevQoS("mlx5_2")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(qos).To(Equal(retVal))
-				Expect(hostQos).To(Equal(rdmatypes.RDMAQoS{TOS: 55, TC: 11}))
+				Expect(hostQos).To(Equal(&rdmatypes.RDMAQoS{TOS: 55, TC: 11}))
 			})
 		})
 	})
@@ -75,7 +75,7 @@ var _ = Describe("RdmaQoSManager", func() {
 		Context("Basic Call, no failure from RdmaBasicOps", func() {
 			It("Should pass and return value as provided by rdmaBasicOps", func() {
 				netNs := &dummyNetNs{fd: 88}
-				err := qosManager.SetRdmaDevQoS(netNs, "mlx5_6", rdmatypes.RDMAQoS{TOS: 99, TC: 11})
+				err := qosManager.SetRdmaDevQoS(netNs, "mlx5_6", &rdmatypes.RDMAQoS{TOS: 99, TC: 11})
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
@@ -84,18 +84,18 @@ var _ = Describe("RdmaQoSManager", func() {
 
 type fakerdmaQoSManagerOps struct {
 	fakefs afero.Afero
-	qos    rdmatypes.RDMAQoS
+	qos    *rdmatypes.RDMAQoS
 }
 
-func newFakerdmaQoSManagerOps(qos rdmatypes.RDMAQoS) rdmaQoSManagerOps {
+func newFakerdmaQoSManagerOps(qos *rdmatypes.RDMAQoS) rdmaQoSManagerOps {
 	return &fakerdmaQoSManagerOps{fakefs: afero.Afero{Fs: afero.NewMemMapFs()}, qos: qos}
 }
 
-func (fqm *fakerdmaQoSManagerOps) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error) {
+func (fqm *fakerdmaQoSManagerOps) getRdmaDevQoSFormSysfs(rdmaDev string) (*rdmatypes.RDMAQoS, error) {
 	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev, "ports", "1")
 	err := fqm.fakefs.MkdirAll(rdmaDevQoSPath, 0755)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
+		return nil, fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
 	}
 
 	tosPath := path.Join(rdmaDevQoSPath, "default_roce_tos")
@@ -103,28 +103,28 @@ func (fqm *fakerdmaQoSManagerOps) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmaty
 
 	tos, err := fqm.fakefs.ReadFile(tosPath)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
+		return nil, err
 	}
 	tosVal, err := parseUint32(tos)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
+		return nil, err
 	}
 	tcPath := path.Join(rdmaDevQoSPath, "tc", "1", "traffic_class")
 	fqm.fakefs.WriteFile(tcPath, []byte(strconv.Itoa(int(fqm.qos.TC))+"\n"), 0644)
 
 	tc, err := fqm.fakefs.ReadFile(tcPath)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
+		return nil, err
 	}
 	tcVal, err := parseUint32(tc)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, err
+		return nil, err
 	}
 
-	return rdmatypes.RDMAQoS{TOS: tosVal, TC: tcVal}, nil
+	return &rdmatypes.RDMAQoS{TOS: tosVal, TC: tcVal}, nil
 }
 
-func (fqm *fakerdmaQoSManagerOps) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
+func (fqm *fakerdmaQoSManagerOps) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos *rdmatypes.RDMAQoS) error {
 	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
 	err := fqm.fakefs.MkdirAll(rdmaDevQoSPath, 0755)
 	if err != nil {

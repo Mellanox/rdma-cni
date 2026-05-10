@@ -230,7 +230,7 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	}
 
 	// Get RDMA device name from netdevice or CNI args
-	rdmaDev, origRdmaDev, err := plugin.getRDMADevice(conf.Args.CNI.RDMADeviceName, args.IfName, conf.DeviceID)
+	rdmaDev, origRdmaDev, err := plugin.getRDMADevice(conf, args.IfName)
 	if err != nil {
 		return fmt.Errorf("failed to get RDMA device for device ID %s: %w", conf.DeviceID, err)
 	}
@@ -240,12 +240,14 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to get RDMA device %s QoS: %w", rdmaDev, err)
 	}
 
-	// set RDMA device traffic class in root namespace, since mlx5_ib driver does not support setting TC in netns
-	err = plugin.qosManager.SetRdmaDevQoS(nil, origRdmaDev, rdmatypes.RDMAQoS{TOS: 0, TC: qos.TC})
-	if err != nil {
-		return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaDev, rdmatypes.RDMAQoS{TOS: 0, TC: qos.TC}, err)
+	// set RDMA device traffic class in root namespace, since mlx5_ib driver does not support setting TC in netns.
+	if qos != nil {
+		err = plugin.qosManager.SetRdmaDevQoS(nil, origRdmaDev, &rdmatypes.RDMAQoS{TOS: 0, TC: qos.TC})
+		if err != nil {
+			return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaDev, rdmatypes.RDMAQoS{TOS: 0, TC: qos.TC}, err)
+		}
+		log.Debug().Msgf("rdmaDev: %s, origRdmaDev: %s", rdmaDev, origRdmaDev)
 	}
-	log.Debug().Msgf("rdmaDev: %s, origRdmaDev: %s", rdmaDev, origRdmaDev)
 
 	// Modify custom RDMA device name through the CNI args
 	err = plugin.setRdmaDevName(origRdmaDev, rdmaDev)
@@ -257,10 +259,12 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	if err != nil {
 		return fmt.Errorf("failed to move RDMA device %s to namespace. %v", rdmaDev, err)
 	}
-	// set RDMA device TOS in container namespace
-	err = plugin.setRdmaDevQoS(args.Netns, rdmaDev, rdmatypes.RDMAQoS{TOS: qos.TOS, TC: 0})
-	if err != nil {
-		return fmt.Errorf("failed to set RDMA device %s QoS. %v", rdmaDev, err)
+	if qos != nil {
+		// set RDMA device TOS in container namespace
+		err = plugin.setRdmaDevQoS(args.Netns, rdmaDev, &rdmatypes.RDMAQoS{TOS: qos.TOS, TC: 0})
+		if err != nil {
+			return fmt.Errorf("failed to set RDMA device %s QoS. %v", rdmaDev, err)
+		}
 	}
 
 	// Save RDMA state
@@ -334,15 +338,17 @@ func (plugin *rdmaCniPlugin) CmdDel(args *skel.CmdArgs) error {
 		}
 	}
 	// restore RDMA device QoS once the RDMA device is restored to the default namespace
-	err = plugin.qosManager.SetRdmaDevQoS(nil, rdmaDev, rdmaState.RDMAQoS)
-	if err != nil {
-		if errors.Is(err, rdma.ErrRdmaDeviceNotFound) {
-			log.Warn().Msgf("RDMA device %s not found. Restoring QoS failed. %v", rdmaDev, err)
-			return nil
+	if rdmaState.RDMAQoS != nil {
+		err = plugin.qosManager.SetRdmaDevQoS(nil, rdmaDev, rdmaState.RDMAQoS)
+		if err != nil {
+			if errors.Is(err, rdma.ErrRdmaDeviceNotFound) {
+				log.Warn().Msgf("RDMA device %s not found. Restoring QoS failed. %v", rdmaDev, err)
+				return nil
+			}
+			return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaDev, rdmaState.RDMAQoS, err)
 		}
-		return fmt.Errorf("failed to set RDMA device %s QoS: %+v. %v", rdmaDev, rdmaState.RDMAQoS, err)
+		log.Info().Msgf("RDMA device %s QoS: %+v", rdmaDev, rdmaState.RDMAQoS)
 	}
-	log.Info().Msgf("RDMA device %s QoS: %+v", rdmaDev, rdmaState.RDMAQoS)
 
 	if !skipRdmaDeviceRestore {
 		// Restore root namespace RDMA device name stored in cache
@@ -361,13 +367,14 @@ func (plugin *rdmaCniPlugin) CmdDel(args *skel.CmdArgs) error {
 
 // getRDMADevice returns CNI interface name or user provided name as the RDMA device name.
 // Original RDMA device name is returned to restore the RDMA device name upon CmdDel.
-func (plugin *rdmaCniPlugin) getRDMADevice(rdmaDeviceName,
-	ifName, deviceID string) (string, string, error) {
+func (plugin *rdmaCniPlugin) getRDMADevice(rdmaConf *rdmatypes.RdmaNetConf,
+	ifName string) (string, string, error) {
 	var (
 		rdmaDevs    []string
 		origRdmaDev string
 	)
 
+	deviceID := rdmaConf.DeviceID
 	if utils.IsPCIAddress(deviceID) {
 		rdmaDevs = plugin.rdmaManager.GetRdmaDevsForPciDev(deviceID)
 		if len(rdmaDevs) == 0 {
@@ -389,11 +396,15 @@ func (plugin *rdmaCniPlugin) getRDMADevice(rdmaDeviceName,
 	origRdmaDev = rdmaDevs[0]
 
 	// use CNI interface name or user provided name as the RDMA device name
-	if ifName != "" {
+	// todo: since there is a kernel bug which prevents using same rdma device name in host,
+	// even on different netns although exlusive mode is set.
+	// customization of rdma device name is conditioned:
+	// setting 'rdma_' prefix + ifName only in case of QoS is set and ifName is provided
+	if rdmaConf.RDMAQoS != nil && ifName != "" {
 		rdmaDevs[0] = rdmaDevPrefix + ifName
 	}
-	if rdmaDeviceName != "" {
-		rdmaDevs[0] = rdmaDeviceName
+	if rdmaConf.Args.CNI.RDMADeviceName != "" {
+		rdmaDevs[0] = rdmaConf.Args.CNI.RDMADeviceName
 	}
 
 	return rdmaDevs[0], origRdmaDev, nil
@@ -418,7 +429,7 @@ func (plugin *rdmaCniPlugin) setRdmaDevName(origRdmaDev, rdmaDev string) error {
 }
 
 // setRdmaDevQoS sets the RDMA device QoS in the given network namespace
-func (plugin *rdmaCniPlugin) setRdmaDevQoS(netns string, rdmaDev string, qos rdmatypes.RDMAQoS) error {
+func (plugin *rdmaCniPlugin) setRdmaDevQoS(netns string, rdmaDev string, qos *rdmatypes.RDMAQoS) error {
 	log.Info().Msgf("targetNS: %s, rdmaDev: %s, qos: %+v", netns, rdmaDev, qos)
 	targetNs, err := plugin.nsManager.GetNS(netns)
 	if err != nil {
@@ -435,13 +446,13 @@ func (plugin *rdmaCniPlugin) setRdmaDevQoS(netns string, rdmaDev string, qos rdm
 	return err
 }
 
-func (plugin *rdmaCniPlugin) getRdmaDevQoS(confQos rdmatypes.RDMAQoS, rdmaDev string) (rdmatypes.RDMAQoS, rdmatypes.RDMAQoS, error) {
+func (plugin *rdmaCniPlugin) getRdmaDevQoS(confQos *rdmatypes.RDMAQoS, rdmaDev string) (*rdmatypes.RDMAQoS, *rdmatypes.RDMAQoS, error) {
 	// Load RDMA CNI QoS configuration
 	plugin.qosManager.LoadRdmaCniQoSConfig(confQos)
 	// Get RDMA device QoS
 	hostQos, qos, err := plugin.qosManager.GetRdmaDevQoS(rdmaDev)
 	if err != nil {
-		return rdmatypes.RDMAQoS{}, rdmatypes.RDMAQoS{}, fmt.Errorf("failed to get RDMA device %s QoS: %w", rdmaDev, err)
+		return nil, nil, fmt.Errorf("failed to get RDMA device %s QoS: %w", rdmaDev, err)
 	}
 	log.Info().Msgf("RDMA device %s QoS: %+v", rdmaDev, qos)
 	return hostQos, qos, nil
