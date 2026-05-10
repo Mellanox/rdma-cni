@@ -38,28 +38,32 @@ func (_m *MockQoSManager) EXPECT() *MockQoSManager_Expecter {
 }
 
 // GetRdmaDevQoS provides a mock function for the type MockQoSManager
-func (_mock *MockQoSManager) GetRdmaDevQoS(rdmaDev string) (types.RDMAQoS, types.RDMAQoS, error) {
+func (_mock *MockQoSManager) GetRdmaDevQoS(rdmaDev string) (*types.RDMAQoS, *types.RDMAQoS, error) {
 	ret := _mock.Called(rdmaDev)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetRdmaDevQoS")
 	}
 
-	var r0 types.RDMAQoS
-	var r1 types.RDMAQoS
+	var r0 *types.RDMAQoS
+	var r1 *types.RDMAQoS
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(string) (types.RDMAQoS, types.RDMAQoS, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) (*types.RDMAQoS, *types.RDMAQoS, error)); ok {
 		return returnFunc(rdmaDev)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) types.RDMAQoS); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) *types.RDMAQoS); ok {
 		r0 = returnFunc(rdmaDev)
 	} else {
-		r0 = ret.Get(0).(types.RDMAQoS)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.RDMAQoS)
+		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) types.RDMAQoS); ok {
+	if returnFunc, ok := ret.Get(1).(func(string) *types.RDMAQoS); ok {
 		r1 = returnFunc(rdmaDev)
 	} else {
-		r1 = ret.Get(1).(types.RDMAQoS)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*types.RDMAQoS)
+		}
 	}
 	if returnFunc, ok := ret.Get(2).(func(string) error); ok {
 		r2 = returnFunc(rdmaDev)
@@ -93,18 +97,18 @@ func (_c *MockQoSManager_GetRdmaDevQoS_Call) Run(run func(rdmaDev string)) *Mock
 	return _c
 }
 
-func (_c *MockQoSManager_GetRdmaDevQoS_Call) Return(rDMAQoS types.RDMAQoS, rDMAQoS1 types.RDMAQoS, err error) *MockQoSManager_GetRdmaDevQoS_Call {
+func (_c *MockQoSManager_GetRdmaDevQoS_Call) Return(rDMAQoS *types.RDMAQoS, rDMAQoS1 *types.RDMAQoS, err error) *MockQoSManager_GetRdmaDevQoS_Call {
 	_c.Call.Return(rDMAQoS, rDMAQoS1, err)
 	return _c
 }
 
-func (_c *MockQoSManager_GetRdmaDevQoS_Call) RunAndReturn(run func(rdmaDev string) (types.RDMAQoS, types.RDMAQoS, error)) *MockQoSManager_GetRdmaDevQoS_Call {
+func (_c *MockQoSManager_GetRdmaDevQoS_Call) RunAndReturn(run func(rdmaDev string) (*types.RDMAQoS, *types.RDMAQoS, error)) *MockQoSManager_GetRdmaDevQoS_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // LoadRdmaCniQoSConfig provides a mock function for the type MockQoSManager
-func (_mock *MockQoSManager) LoadRdmaCniQoSConfig(qosConf types.RDMAQoS) {
+func (_mock *MockQoSManager) LoadRdmaCniQoSConfig(qosConf *types.RDMAQoS) {
 	_mock.Called(qosConf)
 	return
 }
@@ -115,16 +119,16 @@ type MockQoSManager_LoadRdmaCniQoSConfig_Call struct {
 }
 
 // LoadRdmaCniQoSConfig is a helper method to define mock.On call
-//   - qosConf types.RDMAQoS
+//   - qosConf *types.RDMAQoS
 func (_e *MockQoSManager_Expecter) LoadRdmaCniQoSConfig(qosConf interface{}) *MockQoSManager_LoadRdmaCniQoSConfig_Call {
 	return &MockQoSManager_LoadRdmaCniQoSConfig_Call{Call: _e.mock.On("LoadRdmaCniQoSConfig", qosConf)}
 }
 
-func (_c *MockQoSManager_LoadRdmaCniQoSConfig_Call) Run(run func(qosConf types.RDMAQoS)) *MockQoSManager_LoadRdmaCniQoSConfig_Call {
+func (_c *MockQoSManager_LoadRdmaCniQoSConfig_Call) Run(run func(qosConf *types.RDMAQoS)) *MockQoSManager_LoadRdmaCniQoSConfig_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 types.RDMAQoS
+		var arg0 *types.RDMAQoS
 		if args[0] != nil {
-			arg0 = args[0].(types.RDMAQoS)
+			arg0 = args[0].(*types.RDMAQoS)
 		}
 		run(
 			arg0,
@@ -138,13 +142,13 @@ func (_c *MockQoSManager_LoadRdmaCniQoSConfig_Call) Return() *MockQoSManager_Loa
 	return _c
 }
 
-func (_c *MockQoSManager_LoadRdmaCniQoSConfig_Call) RunAndReturn(run func(qosConf types.RDMAQoS)) *MockQoSManager_LoadRdmaCniQoSConfig_Call {
+func (_c *MockQoSManager_LoadRdmaCniQoSConfig_Call) RunAndReturn(run func(qosConf *types.RDMAQoS)) *MockQoSManager_LoadRdmaCniQoSConfig_Call {
 	_c.Run(run)
 	return _c
 }
 
 // SetRdmaDevQoS provides a mock function for the type MockQoSManager
-func (_mock *MockQoSManager) SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos types.RDMAQoS) error {
+func (_mock *MockQoSManager) SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qos *types.RDMAQoS) error {
 	ret := _mock.Called(targetNs, rdmaDev, qos)
 
 	if len(ret) == 0 {
@@ -152,7 +156,7 @@ func (_mock *MockQoSManager) SetRdmaDevQoS(targetNs ns.NetNS, rdmaDev string, qo
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(ns.NetNS, string, types.RDMAQoS) error); ok {
+	if returnFunc, ok := ret.Get(0).(func(ns.NetNS, string, *types.RDMAQoS) error); ok {
 		r0 = returnFunc(targetNs, rdmaDev, qos)
 	} else {
 		r0 = ret.Error(0)
@@ -168,12 +172,12 @@ type MockQoSManager_SetRdmaDevQoS_Call struct {
 // SetRdmaDevQoS is a helper method to define mock.On call
 //   - targetNs ns.NetNS
 //   - rdmaDev string
-//   - qos types.RDMAQoS
+//   - qos *types.RDMAQoS
 func (_e *MockQoSManager_Expecter) SetRdmaDevQoS(targetNs interface{}, rdmaDev interface{}, qos interface{}) *MockQoSManager_SetRdmaDevQoS_Call {
 	return &MockQoSManager_SetRdmaDevQoS_Call{Call: _e.mock.On("SetRdmaDevQoS", targetNs, rdmaDev, qos)}
 }
 
-func (_c *MockQoSManager_SetRdmaDevQoS_Call) Run(run func(targetNs ns.NetNS, rdmaDev string, qos types.RDMAQoS)) *MockQoSManager_SetRdmaDevQoS_Call {
+func (_c *MockQoSManager_SetRdmaDevQoS_Call) Run(run func(targetNs ns.NetNS, rdmaDev string, qos *types.RDMAQoS)) *MockQoSManager_SetRdmaDevQoS_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 ns.NetNS
 		if args[0] != nil {
@@ -183,9 +187,9 @@ func (_c *MockQoSManager_SetRdmaDevQoS_Call) Run(run func(targetNs ns.NetNS, rdm
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 types.RDMAQoS
+		var arg2 *types.RDMAQoS
 		if args[2] != nil {
-			arg2 = args[2].(types.RDMAQoS)
+			arg2 = args[2].(*types.RDMAQoS)
 		}
 		run(
 			arg0,
@@ -201,7 +205,7 @@ func (_c *MockQoSManager_SetRdmaDevQoS_Call) Return(err error) *MockQoSManager_S
 	return _c
 }
 
-func (_c *MockQoSManager_SetRdmaDevQoS_Call) RunAndReturn(run func(targetNs ns.NetNS, rdmaDev string, qos types.RDMAQoS) error) *MockQoSManager_SetRdmaDevQoS_Call {
+func (_c *MockQoSManager_SetRdmaDevQoS_Call) RunAndReturn(run func(targetNs ns.NetNS, rdmaDev string, qos *types.RDMAQoS) error) *MockQoSManager_SetRdmaDevQoS_Call {
 	_c.Call.Return(run)
 	return _c
 }
