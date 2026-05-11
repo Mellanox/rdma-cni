@@ -230,7 +230,7 @@ func (plugin *rdmaCniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	}
 
 	// Get RDMA device name from netdevice or CNI args
-	rdmaDev, origRdmaDev, err := plugin.getRDMADevice(conf.Args.CNI.RDMADeviceName, args.IfName, conf.DeviceID)
+	rdmaDev, origRdmaDev, err := plugin.getRDMADevice(conf.Args.CNI.RDMADeviceName, conf.DeviceID)
 	if err != nil {
 		return fmt.Errorf("failed to get RDMA device for device ID %s: %w", conf.DeviceID, err)
 	}
@@ -361,8 +361,7 @@ func (plugin *rdmaCniPlugin) CmdDel(args *skel.CmdArgs) error {
 
 // getRDMADevice returns CNI interface name or user provided name as the RDMA device name.
 // Original RDMA device name is returned to restore the RDMA device name upon CmdDel.
-func (plugin *rdmaCniPlugin) getRDMADevice(rdmaDeviceName,
-	ifName, deviceID string) (string, string, error) {
+func (plugin *rdmaCniPlugin) getRDMADevice(rdmaDeviceName, deviceID string) (string, string, error) {
 	var (
 		rdmaDevs    []string
 		origRdmaDev string
@@ -388,10 +387,6 @@ func (plugin *rdmaCniPlugin) getRDMADevice(rdmaDeviceName,
 	// original RDMA device name is the first RDMA device found
 	origRdmaDev = rdmaDevs[0]
 
-	// use CNI interface name or user provided name as the RDMA device name
-	if ifName != "" {
-		rdmaDevs[0] = rdmaDevPrefix + ifName
-	}
 	if rdmaDeviceName != "" {
 		rdmaDevs[0] = rdmaDeviceName
 	}
