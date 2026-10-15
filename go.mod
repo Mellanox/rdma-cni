@@ -12,6 +12,7 @@ require (
 	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.12.1
 	github.com/vishvananda/netlink v1.3.1
+	github.com/vishvananda/netns v0.0.5
 )
 
 require (

@@ -69,7 +69,45 @@ For a Kubernetes deployment, each SR-IOV capable worker node should have:
   }
 }
 ```
-> __*Note:*__ "args" keyword is optional.
+
+### RoCE QoS (optional)
+
+Set default RoCE **TOS** (Type of Service) and **TC** (traffic class) for the RDMA device. Omitted or zero values fall back to the device’s current sysfs settings.
+
+```json
+{
+  "cniVersion": "0.3.1",
+  "type": "rdma",
+  "args": {
+    "cni": {
+      "debug": true,
+      "rdmaQoS": {
+        "tos": 102,
+        "tc": 96
+      }
+    }
+  }
+}
+```
+
+> __*Note:*__ `"args"` is optional. `"rdmaQoS"` is optional; include `tos` and/or `tc` as needed for your fabric QoS.
+
+### RDMADeviceName (optional)
+Optional `rdmaDeviceName` (under `args.cni`) allow users to set custom RDMA device name. Upon `cmdDel` original RDMA device name will be restored.
+
+```json
+{
+  "cniVersion": "0.3.1",
+  "type": "rdma",
+  "args": {
+    "cni": {
+      "rdmaDeviceName": "custom-name",
+      "debug": true
+    }
+  }
+}
+```
+> __*Note:*__ `rdmaDeviceName` is optional
 
 # Deployment
 
