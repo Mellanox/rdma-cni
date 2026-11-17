@@ -27,14 +27,18 @@ import (
 	"syscall"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/rs/zerolog/log"
+	"github.com/spf13/afero"
+
 	rdmatypes "github.com/k8snetworkplumbingwg/rdma-cni/pkg/types"
 	"github.com/k8snetworkplumbingwg/rdma-cni/pkg/utils"
-	"github.com/rs/zerolog/log"
 )
 
 const (
 	rdmaCMConfigfsPath = "/sys/kernel/config/rdma_cm"
 	rdmaSysfsPath      = "/sys/class/infiniband"
+	sysfsDirMode       = 0755
+	sysfsFileMode      = 0644
 )
 
 // QoSManager interface for managing RDMA device QoS configuration.
@@ -64,10 +68,16 @@ type rdmaQoSManagerOps interface {
 	setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error
 }
 
-type rdmaQoSManagerOpsIml struct{}
+type rdmaQoSManagerOpsIml struct {
+	fs            afero.Afero
+	mountConfigFS func() error
+}
 
 func newrdmaQoSManagerOps() rdmaQoSManagerOps {
-	return &rdmaQoSManagerOpsIml{}
+	return &rdmaQoSManagerOpsIml{
+		fs:            afero.Afero{Fs: afero.NewOsFs()},
+		mountConfigFS: utils.MountConfigFS,
+	}
 }
 
 // GetRdmaDevQoS returns RDMA QoS for the given RDMA device.
@@ -77,14 +87,14 @@ func newrdmaQoSManagerOps() rdmaQoSManagerOps {
 func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatypes.RDMAQoS, error) {
 	var (
 		tosVal uint32
-		tcVal  uint32
+		tcVal  *uint32
 	)
 	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
-	err := os.MkdirAll(rdmaDevQoSPath, 0755)
+	err := rqm.fs.MkdirAll(rdmaDevQoSPath, sysfsDirMode)
 	if err != nil {
 		return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
 	}
-	tos, err := os.ReadFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"))
+	tos, err := rqm.fs.ReadFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"))
 	if err != nil {
 		return rdmatypes.RDMAQoS{}, err
 	}
@@ -95,25 +105,17 @@ func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatyp
 	}
 
 	// check if /sys/class/infiniband/<rdmaDev>/tc exists
-	if _, err := os.Stat(path.Join(rdmaSysfsPath, rdmaDev, "tc")); err == nil {
+	if _, err := rqm.fs.Stat(path.Join(rdmaSysfsPath, rdmaDev, "tc")); err == nil {
 		// read the traffic class value from /sys/class/infiniband/<rdmaDev>/tc/1/traffic_class
-		// file may contain multiple lines; first line is "Global tclass=<value>". If missing or invalid, use 0 so CNI config applies.
-		tc, err := os.ReadFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"))
+		// A missing global entry means application-selected traffic classes are not overridden.
+		tc, err := rqm.fs.ReadFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"))
 		if err != nil {
 			return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to read traffic class file for RDMA device %s: %w", rdmaDev, err)
 		}
 
-		// if tc is not empty, parse the traffic class value
-		if len(tc) > 0 {
-			tcValStr := string(tc)
-			if i := strings.Index(tcValStr, "tclass="); i >= 0 {
-				// fetch tclass value, handle case where tc is a multi-line string
-				tcValStr = strings.TrimSpace(strings.SplitN(tcValStr[i+len("tclass="):], "\n", 2)[0])
-			}
-			tcVal, err = parseUint32([]byte(tcValStr))
-			if err != nil {
-				return rdmatypes.RDMAQoS{}, err
-			}
+		tcVal, err = parseTrafficClass(tc)
+		if err != nil {
+			return rdmatypes.RDMAQoS{}, fmt.Errorf("failed to parse traffic class for RDMA device %s: %w", rdmaDev, err)
 		}
 	} else {
 		if !os.IsNotExist(err) {
@@ -123,48 +125,59 @@ func (rqm *rdmaQoSManagerOpsIml) getRdmaDevQoSFormSysfs(rdmaDev string) (rdmatyp
 	}
 
 	return rdmatypes.RDMAQoS{TOS: tosVal, TC: tcVal}, nil
-
 }
 
-// SetRdmaDevQoS sets RoCE TOS and TC for the RDMA device in the target network namespace.
+// setRdmaDevQoSToSysfs sets TOS in either namespace and TC only in the host namespace.
 // The kernel does not preserve default_roce_tos when moving an RDMA device
 // to another netns via netlink.
 // CMA's cma_device is removed and re-created with zeroed default_roce_tos.
 // Setting QoS in the target namespace after the move is therefore required.
 func (rqm *rdmaQoSManagerOpsIml) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev string, qos rdmatypes.RDMAQoS) error {
-
 	// mount configfs in case executed in non-root network namespace
 	if targetNs != nil {
-		err := utils.MountConfigFS()
+		err := rqm.mountConfigFS()
 		if err != nil {
 			return fmt.Errorf("failed to mount configfs in target namespace: %w", err)
 		}
 	}
 	rdmaDevQoSPath := path.Join(rdmaCMConfigfsPath, rdmaDev)
-	err := os.MkdirAll(rdmaDevQoSPath, 0755)
+	err := rqm.fs.MkdirAll(rdmaDevQoSPath, sysfsDirMode)
 	if err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", rdmaDevQoSPath, err)
 	}
-	err = os.WriteFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"), []byte(strconv.Itoa(int(qos.TOS))), 0644)
+	err = rqm.fs.WriteFile(path.Join(rdmaDevQoSPath, "ports", "1", "default_roce_tos"),
+		[]byte(strconv.Itoa(int(qos.TOS))), sysfsFileMode)
 	if err != nil {
 		if errors.Is(err, syscall.ENODEV) {
 			return fmt.Errorf("rdma device %s not found while writing default_roce_tos: %w",
 				rdmaDev, errors.Join(ErrRdmaDeviceNotFound, err))
 		}
+		return err
+	}
+
+	// mlx5 traffic class is host-only. Never change it after moving into a container namespace.
+	if targetNs != nil {
+		return nil
 	}
 
 	// check if /sys/class/infiniband/<rdmaDev>/tc exists
-	if _, err := os.Stat(path.Join(rdmaSysfsPath, rdmaDev, "tc")); err == nil {
-		err = os.WriteFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"), []byte(strconv.Itoa(int(qos.TC))), 0644)
+	if _, err := rqm.fs.Stat(path.Join(rdmaSysfsPath, rdmaDev, "tc")); err == nil {
+		trafficClass := "-1"
+		if qos.TC != nil {
+			trafficClass = strconv.FormatUint(uint64(*qos.TC), 10)
+		}
+		err = rqm.fs.WriteFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"),
+			[]byte(trafficClass), sysfsFileMode)
 		if err != nil {
 			return err
 		}
 		// read the traffic class value from /sys/class/infiniband/<rdmaDev>/tc/1/traffic_class
-		tc, err := os.ReadFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"))
+		tc, err := rqm.fs.ReadFile(path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"))
 		if err != nil {
 			return err
 		}
-		log.Warn().Msgf("TC: '%s'val: '%s' for RDMA device %s.", path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"), tc, rdmaDev)
+		log.Warn().Msgf("TC: '%s'val: '%s' for RDMA device %s.",
+			path.Join(rdmaSysfsPath, rdmaDev, "tc", "1", "traffic_class"), tc, rdmaDev)
 	} else {
 		if !os.IsNotExist(err) {
 			return err
@@ -177,6 +190,10 @@ func (rqm *rdmaQoSManagerOpsIml) setRdmaDevQoSToSysfs(targetNs ns.NetNS, rdmaDev
 
 // LoadRdmaCniQoSConfig sets RDMA CNI QoS configuration.
 func (rqm *rdmaQoSManager) LoadRdmaCniQoSConfig(qosConf rdmatypes.RDMAQoS) {
+	if qosConf.TC != nil {
+		tc := *qosConf.TC
+		qosConf.TC = &tc
+	}
 	rqm.qosConf = qosConf
 }
 
@@ -188,7 +205,20 @@ func (rqm *rdmaQoSManager) GetRdmaDevQoS(rdmaDev string) (rdmatypes.RDMAQoS, rdm
 		return rdmatypes.RDMAQoS{}, rdmatypes.RDMAQoS{}, fmt.Errorf("failed to get RDMA device %s host QoS: %w", rdmaDev, err)
 	}
 
-	return hostQos, rqm.qosConf, nil
+	// Zero or omitted configuration values inherit the host settings. Keep the
+	// disabled global-TC state distinct from a global override of zero.
+	qos := hostQos
+	if rqm.qosConf.TOS != 0 {
+		qos.TOS = rqm.qosConf.TOS
+	}
+	if rqm.qosConf.TC != nil && *rqm.qosConf.TC != 0 {
+		qos.TC = rqm.qosConf.TC
+	}
+	if qos.TC != nil {
+		tc := *qos.TC
+		qos.TC = &tc
+	}
+	return hostQos, qos, nil
 }
 
 // SetRdmaDevQoS sets RDMA device QoS.
@@ -208,4 +238,23 @@ func parseUint32(b []byte) (uint32, error) {
 		return 0, err
 	}
 	return uint32(v), nil
+}
+
+// parseTrafficClass reads only the global override. Rule-specific traffic classes
+// must not become a global setting; an empty or rules-only file has no override.
+func parseTrafficClass(data []byte) (*uint32, error) {
+	const globalPrefix = "Global tclass="
+	for _, line := range strings.Split(string(data), "\n") {
+		value, found := strings.CutPrefix(strings.TrimSpace(line), globalPrefix)
+		if !found {
+			continue
+		}
+		tc, err := strconv.ParseUint(strings.TrimSpace(value), 10, 32)
+		if err != nil {
+			return nil, err
+		}
+		result := uint32(tc)
+		return &result, nil
+	}
+	return nil, nil
 }

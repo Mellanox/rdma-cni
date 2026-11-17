@@ -78,19 +78,24 @@ Set default RoCE **TOS** (Type of Service) and **TC** (traffic class) for the RD
 {
   "cniVersion": "0.3.1",
   "type": "rdma",
+  "rdmaQoS": {
+    "tos": 102,
+    "tc": 96
+  },
   "args": {
     "cni": {
-      "debug": true,
-      "rdmaQoS": {
-        "tos": 102,
-        "tc": 96
-      }
+      "debug": true
     }
   }
 }
 ```
 
 > __*Note:*__ `"args"` is optional. `"rdmaQoS"` is optional; include `tos` and/or `tc` as needed for your fabric QoS.
+
+`rdmaQoS` belongs at the top level of the `rdma` plugin configuration, alongside `type` and `args`.
+With no `tc` override, the plugin preserves the host's global TC setting, including a disabled override that allows application traffic classes to apply. TC is configured only in the host namespace; the effective TOS is applied after the device moves into the container namespace.
+
+On deletion, the plugin restores the saved host QoS, including a disabled global TC override. Cache entries created by older QoS-enabled versions may contain `tc: 0` for either a disabled override or an actual forced zero; that distinction cannot be recovered. Downgrading to an older plugin also loses the disabled-versus-zero distinction in new cache entries.
 
 ### RDMADeviceName (optional)
 Optional `rdmaDeviceName` (under `args.cni`) allow users to set custom RDMA device name. Upon `cmdDel` original RDMA device name will be restored.
