@@ -37,8 +37,8 @@ type RdmaCNIArgs struct {
 	Debug          bool   `json:"debug"`                    // Run CNI in debug mode
 }
 type RDMAQoS struct {
-	TOS uint32 `json:"tos"` // RoCE TOS (Type of Service) value to set for the RDMA device
-	TC  uint32 `json:"tc"`  // RoCE TC (traffic class) value to set for the RDMA device
+	TOS uint32  `json:"tos"` // RoCE TOS (Type of Service) value to set for the RDMA device
+	TC  *uint32 `json:"tc"`  // nil in saved state means no global traffic-class override
 }
 
 // RDMA Network state struct version
@@ -59,6 +59,6 @@ type RdmaNetState struct {
 	SandboxRdmaDevName string `json:"sandboxRdmaDevName"`
 	// RDMA device name in container
 	ContainerRdmaDevName string `json:"containerRdmaDevName"`
-	// RDMA device QoS
-	RDMAQoS RDMAQoS `json:"rdmaQoS,omitempty"`
+	// RDMA device QoS; absent in caches created before QoS support.
+	RDMAQoS *RDMAQoS `json:"rdmaQoS,omitempty"`
 }
